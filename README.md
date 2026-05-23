@@ -18,67 +18,50 @@ Dark-themed, with server management, split tunneling, and embedded console.
 ## Requirements
 
 - macOS 11 (Big Sur) or later
-- No other dependencies — TrustTunnel CLI client is bundled in the .app
+- MacPorts (https://www.macports.org/)
+- Python 3.11+ with Tkinter 8.6+ (via MacPorts)
 - **Sudo setup** (one-time, see below)
 
-## Why sudo?
+## Why MacPorts?
 
-TrustTunnel creates a virtual network interface (`utun`) for system-wide VPN routing.
-This requires root privileges. There are only three ways to do this on macOS:
+macOS 13 (Ventura) and older are Tier 3 for Homebrew — builds fail.
+MacPorts supports all macOS versions. TrustTunnel uses MacPorts Python 3.11.
 
-| Approach | Effort | Security | Status |
-|---|---|---|---|
-| **sudoers NOPASSWD** | 1 command | ★★★★ | ✅ This app |
-| SUID bit (`chmod u+s`) | 1 command | ★★★ | ⚠️ macOS strips SUID on .app bundles |
-| Privileged Helper (SMJobBless) | Apple dev account + code signing | ★★★★★ | 🔮 v2 roadmap |
-
-This app uses **sudoers NOPASSWD** — the standard approach for tools like Wireshark, VirtualBox, and Docker.
-
-## Sudo setup (one-time, 30 seconds)
+## Install MacPorts
 
 ```bash
-./setup-sudo.sh
+# Download from https://www.macports.org/install.php
+# Then install:
+sudo /opt/local/bin/port -v selfupdate
 ```
-
-Or manually:
-
-```bash
-sudo bash -c 'echo "$(whoami) ALL=(ALL) NOPASSWD: /Applications/TrustTunnel.app/Contents/Resources/bin/trusttunnel_client" > /etc/sudoers.d/trusttunnel'
-```
-
-What this does: tells macOS "user X can run this specific binary as root without a password."
-It is NOT a blanket "run anything as root" — only that one binary.
-
-After setup, TrustTunnel.app works without any password prompts.
-
-## Install (pre-built .app)
-
-Download the latest `TrustTunnel.app` from [Releases](https://github.com/inhale/trusttunnel-macos/releases),
-drag to `/Applications`, double-click. No terminal, no Python, no CLI client needed.
 
 ## Build from source
-
-Requires Python 3.11+ with Tkinter 8.6+ (Homebrew Python recommended):
 
 ```bash
 # 1. Clone
 git clone https://github.com/inhale/trusttunnel-macos.git
 cd trusttunnel-macos
 
-# 2. One-command build
+# 2. Install MacPorts Python + Tkinter
+sudo port install python311 py-tkinter
+
+# 3. Install PyInstaller
+/opt/local/bin/python3.11 -m pip install pyinstaller
+
+# 4. One-command build
 ./build-app.sh
 ```
 
 Output: `dist/TrustTunnel.app` — double-click to run.
 
-### Dev run (no build)
+## Dev run (no build)
 
 ```bash
 # Install deps
-/usr/local/bin/python3.11 -m pip install toml
+/opt/local/bin/python3.11 -m pip install toml pyinstaller
 
 # Run
-/usr/local/bin/python3.11 -m src
+/opt/local/bin/python3.11 -m src
 ```
 
 ## Usage
@@ -123,6 +106,18 @@ TrustTunnel.app
 ├── src/config.py      — TOML profiles, deep-link parser
 ├── trusttunnel.spec   — PyInstaller build config
 └── build-app.sh       — one-command .app builder
+```
+
+## Sudo setup (one-time)
+
+```bash
+./setup-sudo.sh
+```
+
+Or manually:
+
+```bash
+sudo bash -c 'echo "$(whoami) ALL=(ALL) NOPASSWD: /Applications/TrustTunnel.app/Contents/Resources/bin/trusttunnel_client" > /etc/sudoers.d/trusttunnel'
 ```
 
 ## License
