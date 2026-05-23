@@ -9,12 +9,12 @@ cd "$SCRIPT_DIR"
 echo "=== TrustTunnel macOS App Builder ==="
 echo ""
 
-# 1. Ensure Homebrew Python 3.11+ with Tk 8.6+
+# 1. Ensure MacPorts Python 3.11+ with Tk 8.6+
 echo "=== Checking Python + Tkinter ==="
 PYTHON=""
 
-# Preferred: Homebrew Python 3.11
-for candidate in /usr/local/bin/python3.11 /opt/homebrew/bin/python3.11; do
+# Preferred: MacPorts Python 3.11
+for candidate in /opt/local/bin/python3.11 /opt/local/bin/python3; do
     if [ -x "$candidate" ]; then
         ver=$("$candidate" -c "import tkinter; print(tkinter.TkVersion)" 2>/dev/null || echo "0")
         if [ "${ver%%.*}" -ge 8 ] && [ "${ver#*.}" -ge 6 ]; then
@@ -24,97 +24,26 @@ for candidate in /usr/local/bin/python3.11 /opt/homebrew/bin/python3.11; do
     fi
 done
 
-# Fallback: other Homebrew Python 3
-if [ -z "$PYTHON" ]; then
-    for candidate in /usr/local/bin/python3 /opt/homebrew/bin/python3; do
-        if [ -x "$candidate" ] && [[ "$candidate" == *homebrew* ]] 2>/dev/null; then
-            ver=$("$candidate" -c "import tkinter; print(tkinter.TkVersion)" 2>/dev/null || echo "0")
-            if [ "${ver%%.*}" -ge 8 ] && [ "${ver#*.}" -ge 6 ]; then
-                PYTHON="$candidate"
-                break
-            fi
-        fi
-    done
-fi
-
-# If still no suitable Python — give clear fix instructions instead of
-# auto-installing (Homebrew shallow clone, GitHub rate limits, etc.)
+# If no suitable Python — give clear fix instructions
 if [ -z "$PYTHON" ]; then
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"
-    echo "║  ⚠ macOS system Python uses Tk 8.5 — widgets are broken.   ║"
-    echo "║  TrustTunnel needs Homebrew Python 3.11 with Tk 8.6.        ║"
+    echo "║  ⚠ No suitable Python found.                                ║"
+    echo "║  TrustTunnel needs MacPorts Python 3.11 with Tk 8.6.        ║"
     echo "╠══════════════════════════════════════════════════════════════╣"
-    echo "║  Copy-paste to fix (one-time, ~2 min):                      ║"
+    echo "║  Copy-paste to fix (one-time, ~10 min):                      ║"
     echo "║                                                            ║"
-    echo "║  # 1. Fix Homebrew shallow clone (if needed)                ║"
-    echo "║  git -C \"\$(brew --repo homebrew/core)\" fetch --unshallow   ║"
+    echo "║  # 1. Install MacPorts (if not installed)                    ║"
+    echo "║  #    Download from https://www.macports.org/install.php      ║"
     echo "║                                                            ║"
-    echo "║  # 2. Install Python 3.11 with Tk 8.6                       ║"
-    echo "║  brew install python@3.11                                   ║"
+    echo "║  # 2. Install Python 3.11 with Tkinter                       ║"
+    echo "║  sudo port install python311 py-tkinter                      ║"
     echo "║                                                            ║"
     echo "║  # 3. Re-run build                                         ║"
     echo "║  ./build-app.sh                                             ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
-    echo "Run these steps in Terminal now?"
-    read -p "  [y/N]: " run_ans
-    if [ "${run_ans}" = "y" ] || [ "${run_ans}" = "Y" ]; then
-        echo ""
-        echo "  → Fixing Homebrew (this may take 1-2 min)..."
-
-        # Step 1: unshallow — only if the tap exists (not all Macs have it)
-        CORE_TAP="$(brew --repo homebrew/core 2>/dev/null || echo "")"
-        if [ -n "$CORE_TAP" ] && [ -d "$CORE_TAP" ]; then
-            if ! git -C "$CORE_TAP" fetch --unshallow 2>&1; then
-                echo "  → unshallow failed, trying brew update-reset..."
-                brew update-reset 2>&1 || true
-            fi
-        else
-            echo "  → No shallow clone to fix (fresh Homebrew or Apple Silicon)."
-        fi
-
-        # Step 2: install (brew warnings may cause non-zero exit — check binary, not exit code)
-        echo "  → Installing python@3.11..."
-        brew install python@3.11 2>&1 || true
-
-        # Verify: is python3.11 now available?
-        PYTHON_CANDIDATE=""
-        for p in /usr/local/bin/python3.11 /opt/homebrew/bin/python3.11; do
-            [ -x "$p" ] && PYTHON_CANDIDATE="$p" && break
-        done
-
-        if [ -n "$PYTHON_CANDIDATE" ]; then
-            # Verify tkinter WORKS (brew python@3.11 may lack tcl-tk linkage)
-            if "$PYTHON_CANDIDATE" -c "import tkinter" 2>/dev/null; then
-                echo "  ✓ Python 3.11 found with Tk: $PYTHON_CANDIDATE"
-                PYTHON="$PYTHON_CANDIDATE"
-            else
-                echo ""
-                echo "  ✗ Python 3.11 found but WITHOUT _tkinter (no tcl-tk support)."
-                echo "  Fix this on your Mac:"
-                echo ""
-                echo "    brew reinstall python@3.11"
-                echo ""
-                echo "  (If that still fails: brew install tcl-tk && brew reinstall python@3.11)"
-                echo ""
-                echo "  After fixing, re-run: ./build-app.sh"
-                exit 1
-            fi
-        else
-            echo ""
-            echo "  ✗ python@3.11 not found after brew install."
-            echo "  Run these commands in Terminal manually:"
-            echo ""
-            echo "    git -C \"\$(brew --repo homebrew/core)\" fetch --unshallow"
-            echo "    brew install python@3.11"
-            echo "    ./build-app.sh"
-            exit 1
-        fi
-    else
-        echo "Run the steps above and re-run ./build-app.sh"
-        exit 1
-    fi
+    exit 1
 fi
 
 echo "Python: $PYTHON (Tk $("$PYTHON" -c "import tkinter; print(tkinter.TkVersion)"))"
@@ -123,16 +52,13 @@ echo "Python: $PYTHON (Tk $("$PYTHON" -c "import tkinter; print(tkinter.TkVersio
 echo ""
 echo "=== Installing build dependencies ==="
 
-# Homebrew Python's bin/ may not be on PATH — add it
-BREW_PREFIX="$(brew --prefix python@3.11 2>/dev/null || dirname "$(dirname "$(dirname "$PYTHON")")")"
-export PATH="$BREW_PREFIX/bin:$BREW_PREFIX/libexec/bin:$PATH"
-
+# MacPorts Python's bin/ should be on PATH via /opt/local/bin
+# Install pyinstaller via pip
 _install_deps() {
     if "$PYTHON" -m pip install --quiet pyinstaller 2>/dev/null; then
         return 0
     fi
-    # Homebrew Python 3.11's ensurepip creates a broken pip3 that can't import
-    # its own module. Use get-pip.py (official bootstrap) instead.
+    # MacPorts Python may need ensurepip
     echo "  → pip not found, installing via get-pip.py..."
     curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
     "$PYTHON" /tmp/get-pip.py --quiet 2>&1 || true
@@ -140,13 +66,8 @@ _install_deps() {
     if "$PYTHON" -m pip install --quiet pyinstaller 2>/dev/null; then
         return 0
     fi
-    # Last resort: find any working pip3 in the Homebrew tree
-    PIP3=$(find "$BREW_PREFIX" /usr/local/opt /opt/homebrew/opt \
-                    -name pip3 -maxdepth 8 \( -type f -o -type l \) 2>/dev/null | head -1)
-    if [ -z "$PIP3" ]; then
-        PIP3="$BREW_PREFIX/Frameworks/Python.framework/Versions/3.11/bin/pip3"
-        [ -x "$PIP3" ] || PIP3=""
-    fi
+    # Last resort: find any working pip3
+    PIP3=$(find /opt/local/Library/Frameworks/Python.framework -name pip3 -maxdepth 4 2>/dev/null | head -1)
     if [ -n "$PIP3" ] && "$PIP3" --version >/dev/null 2>&1; then
         "$PIP3" install --quiet pyinstaller 2>&1
         return $?
@@ -178,27 +99,6 @@ fi
 if [ ! -f "icon.icns" ]; then
     echo ""
     echo "=== Generating icon ==="
-
-    # Create a simple 1024x1024 PNG icon using Python + tkinter
-    "$PYTHON" -c "
-import tkinter as tk
-import struct, zlib
-
-SZ = 256
-root = tk.Tk()
-root.withdraw()
-c = tk.Canvas(root, width=SZ, height=SZ, bg='white', highlightthickness=0)
-
-# Shield shape
-pts = [128,20, 236,80, 236,160, 190,190, 128,240, 66,190, 20,160, 20,80]
-c.create_polygon(*pts, fill='#2563eb', outline='#1e40af', width=3, smooth=True)
-
-# 'T' letter
-c.create_text(128, 140, text='T', fill='white', font=('Helvetica', 80, 'bold'))
-
-c.postscript(file='/tmp/tt_icon.ps', width=SZ, height=SZ)
-root.destroy()
-" 2>/dev/null && echo "PS generated" || echo "PS generation skipped (no display)"
 
     # Fallback: simple blue square PNG
     "$PYTHON" -c "
