@@ -70,11 +70,10 @@ block_cipher = None
 a = Analysis(
     ["run.py"],
     pathex=[],
-    binaries=[
-        ("bin/trusttunnel_client", "bin"),
-    ] + tk_binaries,
+    binaries=[] + tk_binaries,
     datas=[
         ("src", "src"),              # all source code (including _vendor/toml)
+        ("bin/trusttunnel_client", "bin"),  # bundled as data → lands in Contents/Resources/bin/
     ] + tk_datas + _extra_datas,
     hiddenimports=[
         "tkinter",

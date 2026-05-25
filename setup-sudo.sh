@@ -5,15 +5,15 @@
 
 set -euo pipefail
 
-# All paths where PyInstaller may place the binary depending on version:
-#   PyInstaller 6.x COLLECT mode: Contents/MacOS/_internal/bin/
-#   PyInstaller 5.x COLLECT mode: Contents/MacOS/bin/
-#   Legacy / Resources layout:    Contents/Resources/bin/
+# The binary always lands in Contents/Resources/bin/ because it is listed
+# under 'datas' in trusttunnel.spec (not 'binaries'), which makes PyInstaller
+# place it via _MEIPASS → Contents/Resources/bin/ on every version.
 APP_DIR="/Applications/TrustTunnel.app/Contents"
 APP_CLI_CANDIDATES=(
+    "$APP_DIR/Resources/bin/trusttunnel_client"
     "$APP_DIR/MacOS/_internal/bin/trusttunnel_client"
     "$APP_DIR/MacOS/bin/trusttunnel_client"
-    "$APP_DIR/Resources/bin/trusttunnel_client"
+    "$APP_DIR/Frameworks/bin/trusttunnel_client"
 )
 BREW_CLI="/usr/local/bin/trusttunnel_client"
 OPT_CLI="/opt/trusttunnel_client/trusttunnel_client"
