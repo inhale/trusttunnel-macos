@@ -322,12 +322,11 @@ class ClientManager:
                 time.sleep(0.5)
                 if self._process.poll() is not None:
                     # Process died
-                    logs = "\n".join(self._status.log_lines[-20:])
+                    logs = _format_crash_log(self._status.log_lines)
                     self._set_error(
                         f"trusttunnel_client exited with code "
                         f"{self._process.returncode}.\n\n"
-                        f"--- last 20 log lines ---\n{logs}\n"
-                        f"--- end of log ---\n\n"
+                        f"{logs}\n"
                         f"Config written to: {config_path}\n"
                         f"Command: sudo -n {binary} -c {config_path}"
                     )
@@ -354,12 +353,11 @@ class ClientManager:
                 while time.time() < extended_deadline:
                     time.sleep(0.5)
                     if self._process.poll() is not None:
-                        logs = "\n".join(self._status.log_lines[-20:])
+                        logs = _format_crash_log(self._status.log_lines)
                         self._set_error(
                             f"trusttunnel_client exited with code "
                             f"{self._process.returncode}.\n\n"
-                            f"--- last 20 log lines ---\n{logs}\n"
-                            f"--- end of log ---\n\n"
+                            f"{logs}\n"
                             f"Config: {config_path}\n"
                             f"Command: sudo -n {binary} -c {config_path}"
                         )
@@ -372,11 +370,10 @@ class ClientManager:
                     if s == ClientState.ERROR:
                         return False
                 # Still alive after 30s total with no tunnel-up — give up
-                logs = "\n".join(self._status.log_lines[-20:])
+                logs = _format_crash_log(self._status.log_lines)
                 self._set_error(
                     f"Tunnel did not come up after 30 seconds.\n\n"
-                    f"--- last 20 log lines ---\n{logs}\n"
-                    f"--- end of log ---\n\n"
+                    f"{logs}\n\n"
                     f"Check the console for errors."
                 )
                 return False
@@ -487,3 +484,22 @@ class ClientManager:
 
 def _ts() -> str:
     return datetime.now().strftime("%H:%M:%S.%f")[:12]
+
+
+def _format_crash_log(log_lines: list) -> str:
+    """Format crash log showing first 30 lines (where errors occur) + last 10 (shutdown context).
+
+    The error/failure lines appear early in the log; the last lines are always
+    clean shutdown noise (DNS teardown, vpn_close) that hides the real cause.
+    """
+    if not log_lines:
+        return "--- no log output ---"
+    head = log_lines[:30]
+    tail = log_lines[-10:] if len(log_lines) > 30 else []
+    parts = ["--- first 30 log lines (errors appear here) ---"]
+    parts.extend(head)
+    if tail:
+        parts.append(f"--- last 10 lines (shutdown noise, {len(log_lines)} total) ---")
+        parts.extend(tail)
+    parts.append("--- end of log ---")
+    return "\n".join(parts)
