@@ -108,9 +108,11 @@ def _setup_styles():
                     fieldbackground="#2d2d2d", rowheight=32, borderwidth=0)
     style.configure("Treeview.Heading", background="#3a3a3a", foreground="#d4d4d4",
                     relief="flat", borderwidth=0, font=("Helvetica", 10, "bold"))
+    # macOS aqua theme overrides foreground even after configure() — must use
+    # style.map to force the color for every widget state including the default.
     style.map("Treeview",
-              background=[("selected", "#0078d4")],
-              foreground=[("selected", "white")])
+              background=[("selected", "#0078d4"), ("!selected", "#2d2d2d")],
+              foreground=[("selected", "white"),   ("!selected", "#d4d4d4")])
 
     style.configure("TNotebook", background="#1e1e1e", borderwidth=0)
     style.configure("TNotebook.Tab", background="#2a2a2a", foreground="#d4d4d4",
@@ -157,13 +159,26 @@ def _build_tray_classes():
         import objc
 
         class MenuTarget(AppKit.NSObject):
-            """Target for all NSMenuItem actions."""
+            """Target for all NSMenuItem actions.
+
+            itemClicked_ fires on the AppKit main thread (same thread as the
+            Tk mainloop on macOS).  We must NOT call app.after() or any Tk
+            API directly from here because PyObjC ObjC->Python callbacks do
+            not guarantee the GIL is held across the call boundary in all
+            PyObjC versions — doing so causes the 'PyEval_RestoreThread: GIL
+            released' abort seen in practice.
+
+            Fix: decode the key synchronously (pure Python, no Tk), then post
+            a real AppKit performSelectorOnMainThread call that runs
+            _dispatch_ on the true AppKit/Tk main thread with the GIL held.
+            """
 
             def init(self):
                 self = objc.super(MenuTarget, self).init()
                 if self is None:
                     return None
                 self._app = None
+                self._pending_key = None
                 return self
 
             @property
@@ -175,6 +190,7 @@ def _build_tray_classes():
                 self._app = value
 
             def itemClicked_(self, sender):
+                # Decode only — no Tk calls here
                 try:
                     raw = sender.representedObject()
                     key = str(raw) if raw is not None else ""
@@ -182,24 +198,35 @@ def _build_tray_classes():
                     key = ""
                 if not key or self._app is None:
                     return
+                self._pending_key = key
+                # Schedule _dispatch_ on the main thread so the GIL is
+                # properly acquired before we touch Tk
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "_dispatch_:", None, False)
+
+            def _dispatch_(self, _):
+                key = self._pending_key
+                self._pending_key = None
+                if not key or self._app is None:
+                    return
                 app = self._app
                 if key == "__show__":
-                    app.after(0, app.deiconify)
+                    app.deiconify()
                 elif key == "__quit__":
-                    app.after(0, app._on_close)
+                    app._on_close()
                 else:
                     try:
                         idx = int(key)
-                        servers = list(app.servers)  # snapshot to avoid race
+                        servers = list(app.servers)
                         if idx < len(servers):
                             connected_name = (
                                 app.client.status.server_name
                                 if app.client.is_connected() else None
                             )
                             if connected_name == servers[idx].name:
-                                app.after(0, app._disconnect)
+                                app._disconnect()
                             else:
-                                app.after(0, lambda i=idx: app._connect_by_index(i))
+                                app._connect_by_index(idx)
                     except Exception:
                         pass
 
