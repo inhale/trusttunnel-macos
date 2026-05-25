@@ -81,9 +81,21 @@ The installer:
 - Downloads the latest TrustTunnel.app
 - Moves it to /Applications
 - Removes the macOS quarantine flag (no Gatekeeper warning)
-- Configures passwordless sudo for VPN (asks your password once)
+- Configures passwordless sudo for VPN — shows a standard macOS password dialog
 
-> No Python, Homebrew, or Xcode required — the app is fully self-contained."
+> No Python, Homebrew, or Xcode required — the app is fully self-contained.
+
+---
+
+### macOS says 'app is damaged' or 'may be malware'?
+
+macOS quarantines files downloaded through a browser. Fix it in Terminal:
+
+\`\`\`bash
+xattr -cr /Applications/TrustTunnel.app
+\`\`\`
+
+Then launch the app again."
 
 # ── Publish ─────────────────────────────────────────────────────────────────
 

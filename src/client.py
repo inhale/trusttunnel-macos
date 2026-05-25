@@ -161,6 +161,10 @@ class ClientManager:
             if result.returncode == 0:
                 return True, "sudo available (passwordless)"
             else:
+                # sudo not configured — try to fix it in-app via osascript
+                fixed, fix_msg = self._fix_sudo(binary)
+                if fixed:
+                    return True, f"sudo configured automatically for {binary}"
                 import getpass as _gp
                 try:
                     user = _gp.getuser()
@@ -168,14 +172,62 @@ class ClientManager:
                     user = "YOUR_USER"
                 return False, (
                     "sudo requires a password or is not configured.\n\n"
-                    "Fix: add this line to /etc/sudoers via 'sudo visudo':\n"
+                    f"Binary path: {binary}\n\n"
+                    "Fix: run this in Terminal:\n"
+                    "  curl -fsSL https://raw.githubusercontent.com/"
+                    "inhale/trusttunnel-macos/main/setup-sudo.sh | bash\n\n"
+                    f"Or manually add to /etc/sudoers via 'sudo visudo':\n"
                     f"  {user}  ALL=(ALL) NOPASSWD: {binary}\n\n"
-                    f"stderr: {result.stderr.strip()}"
+                    f"Auto-fix attempt: {fix_msg}\n"
+                    f"sudo stderr: {result.stderr.strip()}"
                 )
         except FileNotFoundError:
             return False, "'sudo' command not found on this system"
         except subprocess.TimeoutExpired:
             return False, "sudo check timed out (hung waiting for password prompt?)"
+
+    def _fix_sudo(self, binary: str) -> tuple[bool, str]:
+        """Try to write the sudoers entry automatically using osascript (macOS admin dialog)."""
+        try:
+            import getpass as _gp
+            try:
+                user = _gp.getuser()
+            except Exception:
+                return False, "could not determine username"
+
+            sudoers_file = "/etc/sudoers.d/trusttunnel"
+            sudoers_line = f"{user}  ALL=(ALL) NOPASSWD: {binary}"
+            sudoers_content = f"# TrustTunnel VPN — passwordless sudo\\n{sudoers_line}\\n"
+
+            # Build a shell script that writes the sudoers file and verifies syntax
+            shell_script = (
+                f"printf '{sudoers_content}' > {sudoers_file} && "
+                f"chmod 440 {sudoers_file} && "
+                f"visudo -c -f {sudoers_file} || rm -f {sudoers_file}"
+            )
+
+            # osascript runs the shell as admin — shows macOS password dialog
+            result = subprocess.run(
+                ["osascript", "-e",
+                 f'do shell script "{shell_script}" with administrator privileges'],
+                capture_output=True, text=True, timeout=60,
+            )
+            if result.returncode == 0:
+                # Verify it actually works now
+                verify = subprocess.run(
+                    ["sudo", "-n", binary, "--version"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if verify.returncode == 0:
+                    return True, "sudoers entry written successfully"
+                return False, "sudoers written but sudo -n still fails"
+            else:
+                err = result.stderr.strip() or result.stdout.strip()
+                return False, f"osascript failed: {err}"
+        except subprocess.TimeoutExpired:
+            return False, "admin dialog timed out (user may have cancelled)"
+        except Exception as e:
+            return False, f"exception: {e}"
 
     def connect(self, profile: "ServerProfile") -> bool:
         """Start the VPN connection with full diagnostics."""
