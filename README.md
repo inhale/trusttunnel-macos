@@ -18,21 +18,21 @@ Dark-themed, with server management, split tunneling, and embedded console.
 ## Requirements
 
 - macOS 11 (Big Sur) or later
-- MacPorts (https://www.macports.org/)
-- Python 3.11+ with Tkinter 8.6+ (via MacPorts)
+- Python 3.11+ with Tkinter 8.6+ (Homebrew or MacPorts)
 - **Sudo setup** (one-time, see below)
 
-## Why MacPorts?
+## Install Python with Tkinter
 
-macOS 13 (Ventura) and older are Tier 3 for Homebrew — builds fail.
-MacPorts supports all macOS versions. TrustTunnel uses MacPorts Python 3.11.
-
-## Install MacPorts
+### Homebrew (recommended)
 
 ```bash
-# Download from https://www.macports.org/install.php
-# Then install:
-sudo /opt/local/bin/port -v selfupdate
+brew install python-tk@3.11
+```
+
+### MacPorts
+
+```bash
+sudo port install python311 py311-tkinter
 ```
 
 ## Build from source
@@ -42,26 +42,19 @@ sudo /opt/local/bin/port -v selfupdate
 git clone https://github.com/inhale/trusttunnel-macos.git
 cd trusttunnel-macos
 
-# 2. Install MacPorts Python + Tkinter
-sudo port install python311 py-tkinter
+# 2. Install Python with Tkinter (see above, one-time)
 
-# 3. Install PyInstaller
-/opt/local/bin/python3.11 -m pip install pyinstaller
-
-# 4. One-command build
+# 3. One-command build
 ./build-app.sh
 ```
-
-Output: `dist/TrustTunnel.app` — double-click to run.
 
 ## Dev run (no build)
 
 ```bash
-# Install deps
-/opt/local/bin/python3.11 -m pip install toml pyinstaller
-
-# Run
-/opt/local/bin/python3.11 -m src
+# Run directly with any Python 3.11+ that has tkinter
+python3.11 -m src
+# or
+python3 -m src
 ```
 
 ## Usage

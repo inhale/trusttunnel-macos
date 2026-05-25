@@ -9,18 +9,55 @@ cd "$SCRIPT_DIR"
 echo "=== TrustTunnel macOS App Builder ==="
 echo ""
 
-# 1. Ensure MacPorts Python 3.11+ with Tk 8.6+
+# 1. Find Python 3.11+ with Tk 8.6+
 echo "=== Checking Python + Tkinter ==="
 PYTHON=""
 
-# Preferred: MacPorts Python 3.11
-for candidate in /opt/local/bin/python3.11 /opt/local/bin/python3; do
-    if [ -x "$candidate" ]; then
-        ver=$("$candidate" -c "import tkinter; print(tkinter.TkVersion)" 2>/dev/null || echo "0")
-        if [ "${ver%%.*}" -ge 8 ] && [ "${ver#*.}" -ge 6 ]; then
-            PYTHON="$candidate"
-            break
-        fi
+_tk_ok() {
+    local py="$1"
+    [ -x "$py" ] || return 1
+    local ver
+    ver=$("$py" -c "import tkinter; print(tkinter.TkVersion)" 2>/dev/null) || return 1
+    local major="${ver%%.*}"
+    local minor="${ver#*.}"
+    [ "$major" -ge 8 ] && [ "${minor%%.*}" -ge 6 ]
+}
+
+# Search order: MacPorts → Homebrew (arm64 + x86_64) → pyenv → system python3
+_candidates() {
+    # MacPorts
+    echo /opt/local/bin/python3.11
+    echo /opt/local/bin/python3.12
+    echo /opt/local/bin/python3.13
+    echo /opt/local/bin/python3
+    # Homebrew arm64 (Apple Silicon)
+    for v in 3.13 3.12 3.11; do
+        echo "/opt/homebrew/opt/python@${v}/bin/python${v}"
+        echo "/opt/homebrew/bin/python${v}"
+    done
+    echo /opt/homebrew/bin/python3
+    # Homebrew x86_64
+    for v in 3.13 3.12 3.11; do
+        echo "/usr/local/opt/python@${v}/bin/python${v}"
+        echo "/usr/local/bin/python${v}"
+    done
+    echo /usr/local/bin/python3
+    # pyenv shims
+    echo "$HOME/.pyenv/shims/python3"
+    # System
+    echo /usr/bin/python3
+    # PATH fallback
+    command -v python3.13 2>/dev/null
+    command -v python3.12 2>/dev/null
+    command -v python3.11 2>/dev/null
+    command -v python3    2>/dev/null
+}
+
+for candidate in $(_candidates); do
+    [ -n "$candidate" ] || continue
+    if _tk_ok "$candidate"; then
+        PYTHON="$candidate"
+        break
     fi
 done
 
@@ -29,20 +66,29 @@ if [ -z "$PYTHON" ]; then
     echo ""
     echo "╔══════════════════════════════════════════════════════════════╗"
     echo "║  ⚠ No suitable Python found.                                ║"
-    echo "║  TrustTunnel needs MacPorts Python 3.11 with Tk 8.6.        ║"
+    echo "║  TrustTunnel needs Python 3.11+ with Tk 8.6+.               ║"
     echo "╠══════════════════════════════════════════════════════════════╣"
-    echo "║  Copy-paste to fix (one-time, ~10 min):                      ║"
-    echo "║                                                            ║"
-    echo "║  # 1. Install MacPorts (if not installed)                    ║"
-    echo "║  #    Download from https://www.macports.org/install.php      ║"
-    echo "║                                                            ║"
-    echo "║  # 2. Install Python 3.11 with Tkinter                       ║"
-    echo "║  sudo port install python311 py-tkinter                      ║"
-    echo "║                                                            ║"
-    echo "║  # 3. Re-run build                                         ║"
-    echo "║  ./build-app.sh                                             ║"
+    echo "║  Pick ONE of these options:                                  ║"
+    echo "║                                                              ║"
+    echo "║  Option A — Homebrew (recommended):                          ║"
+    echo "║    brew install python-tk@3.11                               ║"
+    echo "║                                                              ║"
+    echo "║  Option B — MacPorts:                                        ║"
+    echo "║    sudo port install python311 py311-tkinter                 ║"
+    echo "║                                                              ║"
+    echo "║  Then re-run: ./build-app.sh                                 ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
     echo ""
+    # Show what was found and why it failed (helps debug)
+    echo "Checked candidates (first 6):"
+    i=0
+    for c in $(_candidates); do
+        [ -n "$c" ] || continue
+        [ -x "$c" ] || continue
+        ver=$("$c" -c "import tkinter; print('Tk', tkinter.TkVersion)" 2>/dev/null || echo "no tkinter")
+        echo "  $c → $ver"
+        i=$((i+1)); [ $i -ge 6 ] && break
+    done
     exit 1
 fi
 
