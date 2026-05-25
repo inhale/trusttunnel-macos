@@ -72,7 +72,13 @@ def _make_button(parent, text, command, style="Dark.TButton", **kwargs):
 # ── Styles ─────────────────────────────────────────────────────────
 def _setup_styles():
     style = ttk.Style()
-    style.theme_use("default")
+    # "clam" is the only ttk theme that reliably respects Treeview foreground
+    # on macOS. "default" and "aqua" both ignore tag_configure/style.map
+    # foreground for unselected rows — text renders as dark grey invisibly.
+    try:
+        style.theme_use("clam")
+    except Exception:
+        style.theme_use("default")
 
     style.configure("Dark.TFrame",      background="#1e1e1e")
     style.configure("Dark.TLabel",      background="#1e1e1e", foreground="#d4d4d4")
