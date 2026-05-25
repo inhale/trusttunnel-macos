@@ -71,16 +71,19 @@ echo ""
 
 NOTES="## Installation
 
-1. Download \`TrustTunnel-macOS-${VERSION}.zip\` and unzip it
-2. Drag \`TrustTunnel.app\` to \`/Applications\`
-3. Open Terminal and run once to enable passwordless VPN:
-   \`\`\`
-   curl -fsSL https://raw.githubusercontent.com/inhale/trusttunnel-macos/main/setup-sudo.sh | bash
-   \`\`\`
-4. Launch TrustTunnel from /Applications or Spotlight
+Paste this into Terminal — it downloads, installs, and configures everything automatically:
 
-> No Python, Homebrew, or Xcode required — the app is fully self-contained.
-> The app is ad-hoc signed; no Gatekeeper warning on first launch."
+\`\`\`bash
+curl -fsSL https://raw.githubusercontent.com/inhale/trusttunnel-macos/main/install-app.sh | bash
+\`\`\`
+
+The installer:
+- Downloads the latest TrustTunnel.app
+- Moves it to /Applications
+- Removes the macOS quarantine flag (no Gatekeeper warning)
+- Configures passwordless sudo for VPN (asks your password once)
+
+> No Python, Homebrew, or Xcode required — the app is fully self-contained."
 
 # ── Publish ─────────────────────────────────────────────────────────────────
 
@@ -92,5 +95,5 @@ gh release create "$VERSION" "$ZIP" \
 echo ""
 echo "✓ Released: https://github.com/inhale/trusttunnel-macos/releases/tag/$VERSION"
 echo ""
-echo "Share this download link with testers:"
-echo "  https://github.com/inhale/trusttunnel-macos/releases/download/${VERSION}/TrustTunnel-macOS-${VERSION}.zip"
+echo "Send testers this one-liner (works for all future releases too):"
+echo "  curl -fsSL https://raw.githubusercontent.com/inhale/trusttunnel-macos/main/install-app.sh | bash"
