@@ -776,7 +776,7 @@ class TrustTunnelWindow(tk.Tk):
             elif is_selected:
                 row_bg, text_fg = "#1e3a5f", "#80c8ff"
             else:
-                row_bg, text_fg = "#2d2d2d", "#d4d4d4"
+                row_bg, text_fg = "#2d2d2d", "#ffffff"
 
             y0 = i * self.ROW_H
             y1 = y0 + self.ROW_H
