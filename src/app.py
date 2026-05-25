@@ -175,16 +175,19 @@ class AddEditDialog(tk.Toplevel):
         self._profile = profile
 
         self.transient(parent)
-        self.grab_set()
 
         self._build()
         self.resizable(False, False)
         self.minsize(440, 360)
 
-        # Force draw
+        # grab_set() AFTER widgets are built and window is mapped —
+        # calling it before causes silent grab failure on some Tk versions,
+        # making all fields and buttons unresponsive.
+        self.update_idletasks()
         self.deiconify()
         self.lift()
-        self.update()
+        self.focus_force()
+        self.grab_set()
 
     def _build(self):
         # Main form area — lighter background so inputs stand out
@@ -576,7 +579,6 @@ class TrustTunnelWindow(tk.Tk):
         dlg.title("Import Deep-Link")
         dlg.configure(bg="#252525")
         dlg.transient(self)
-        dlg.grab_set()
         dlg.resizable(False, False)
 
         f = tk.Frame(dlg, bg="#252525", padx=16, pady=12)
@@ -613,6 +615,16 @@ class TrustTunnelWindow(tk.Tk):
                      style="Dark.TButton").pack(side="left", padx=(0, 10))
         _make_button(bf, text="Import", command=do_import,
                      style="Accent.TButton").pack(side="left")
+
+        # Must update + grab AFTER widgets are packed and window is mapped.
+        # Calling grab_set() before the window is visible causes it to fail
+        # silently on some Tk versions — fields become unclickable.
+        dlg.update_idletasks()
+        dlg.deiconify()
+        dlg.lift()
+        dlg.focus_force()
+        dlg.grab_set()
+        e.focus_set()
 
     # ── Connection ─────────────────────────────────────────────────
 
