@@ -74,10 +74,10 @@ def _setup_styles():
     style = ttk.Style()
     style.theme_use("default")
 
-    style.configure("Dark.TFrame",     background="#1e1e1e")
-    style.configure("Dark.TLabel",     background="#1e1e1e", foreground="#d4d4d4")
-    style.configure("DarkTitle.TLabel",background="#252525", foreground="#d4d4d4")
-    style.configure("DarkBold.TLabel", background="#1e1e1e", foreground="#d4d4d4",
+    style.configure("Dark.TFrame",      background="#1e1e1e")
+    style.configure("Dark.TLabel",      background="#1e1e1e", foreground="#d4d4d4")
+    style.configure("DarkTitle.TLabel", background="#252525", foreground="#d4d4d4")
+    style.configure("DarkBold.TLabel",  background="#1e1e1e", foreground="#d4d4d4",
                     font=("Helvetica", 11, "bold"))
 
     style.configure("Accent.TButton", background="#0078d4", foreground="#ffffff",
@@ -121,258 +121,185 @@ def _setup_styles():
                     foreground="#e0e0e0", insertcolor="#e0e0e0", borderwidth=0)
     style.map("Dark.TEntry", fieldbackground=[("focus", "#1a1a1a")])
 
+    # Sash (divider) between panes — make it thin and dark
+    style.configure("TPanedwindow", background="#1e1e1e")
+    style.configure("Sash", sashthickness=4, relief="flat", background="#3a3a3a")
 
-BG           = "#1e1e1e"
-FG           = "#d4d4d4"
-CONSOLE_BG   = "#0d0d0d"
-ACCENT       = "#0078d4"
-ERROR_RED    = "#f44747"
+
+BG            = "#1e1e1e"
+FG            = "#d4d4d4"
+CONSOLE_BG    = "#0d0d0d"
+ACCENT        = "#0078d4"
+ERROR_RED     = "#f44747"
 SUCCESS_GREEN = "#4ec9b0"
 WARNING_YELLOW = "#cca700"
 
 
-# ── macOS tray icon via PyObjC (no pystray, no extra runloop) ──────
-class TrayManager:
+# ── macOS tray icon via PyObjC ─────────────────────────────────────
+# PyObjC ships with every macOS Python install.
+# The Tk mainloop on macOS pumps AppKit events, so NSStatusItem calls
+# work fine from the main thread via after().
+#
+# KEY FIX for clickable menu items:
+#   NSMenuItem with action=None is DISABLED by AppKit — it renders greyed
+#   and won't fire any delegate callbacks.  Each item must have a real
+#   selector set via setAction_() pointing to a method on a target object
+#   set via setTarget_().  We use a single MenuTarget NSObject whose
+#   itemClicked_() method dispatches by representedObject index.
+
+def _build_tray_classes():
     """
-    macOS menu-bar status item using PyObjC directly.
-
-    PyObjC is bundled with every macOS Python install — no pip needed.
-    The Tk mainloop on macOS already pumps AppKit events, so we can
-    create/update NSStatusItem calls from the main thread via after().
-    All public methods must be called from the Tk main thread.
+    Build and return (TrayIcon class, available bool).
+    Called once lazily so import errors on Linux are silenced.
     """
-
-    _COLOR_MAP = {
-        ClientState.DISCONNECTED: (0.40, 0.40, 0.40),  # grey
-        ClientState.CHECKING:     (0.80, 0.67, 0.00),  # yellow
-        ClientState.CONNECTING:   (0.80, 0.67, 0.00),  # yellow
-        ClientState.CONNECTED:    (0.31, 0.79, 0.69),  # green
-        ClientState.ERROR:        (0.96, 0.28, 0.28),  # red
-    }
-
-    def __init__(self, app: "TrustTunnelWindow"):
-        self._app = app
-        self._status_item = None
-        self._ok = False
-
-    def setup(self):
-        """Called once from Tk main thread after mainloop starts."""
-        try:
-            import AppKit
-            import objc
-
-            self._AppKit = AppKit
-            bar = AppKit.NSStatusBar.systemStatusBar()
-            self._status_item = bar.statusItemWithLength_(
-                AppKit.NSVariableStatusItemLength)
-            btn = self._status_item.button()
-            btn.setTitle_("●")   # filled circle as placeholder until image loads
-            self._status_item.setHighlightMode_(True)
-
-            self._set_color(ClientState.DISCONNECTED)
-            self._rebuild_menu()
-            self._ok = True
-        except Exception:
-            pass   # PyObjC not available (Linux dev machine etc.)
-
-    def _make_ns_image(self, r, g, b, size=18):
-        """Draw a filled circle as an NSImage."""
-        try:
-            AppKit = self._AppKit
-            img = AppKit.NSImage.alloc().initWithSize_((size, size))
-            img.lockFocus()
-            color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(r, g, b, 1.0)
-            color.set()
-            path = AppKit.NSBezierPath.bezierPathWithOvalInRect_(
-                ((2, 2), (size - 4, size - 4)))
-            path.fill()
-            img.unlockFocus()
-            img.setTemplate_(False)
-            return img
-        except Exception:
-            return None
-
-    def _set_color(self, state: ClientState):
-        if not self._status_item:
-            return
-        rgb = self._COLOR_MAP.get(state, (0.4, 0.4, 0.4))
-        img = self._make_ns_image(*rgb)
-        if img:
-            self._status_item.button().setImage_(img)
-            self._status_item.button().setTitle_("")
-
-    def _rebuild_menu(self):
-        if not self._status_item:
-            return
-        try:
-            AppKit = self._AppKit
-            import objc
-
-            menu = AppKit.NSMenu.alloc().init()
-            connected_name = (
-                self._app.client.status.server_name
-                if self._app.client.is_connected() else None
-            )
-
-            for i, server in enumerate(self._app.servers):
-                is_conn = (connected_name == server.name)
-                label = f"✓ {server.name}" if is_conn else f"   {server.name}"
-
-                # Use a simple target/action via a Python callable stored as user info
-                item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                    label, None, "")
-
-                # Store index so the callback knows which server
-                item.setRepresentedObject_(str(i))
-
-                # We can't set a Python callable as action directly;
-                # instead bind a click via the delegate pattern below
-                menu.addItem_(item)
-
-            menu.addItem_(AppKit.NSMenuItem.separatorItem())
-
-            show_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Show Window", None, "")
-            show_item.setRepresentedObject_("__show__")
-            menu.addItem_(show_item)
-
-            quit_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                "Quit", None, "")
-            quit_item.setRepresentedObject_("__quit__")
-            menu.addItem_(quit_item)
-
-            # Delegate handles item selection
-            delegate = _MenuDelegate.alloc().init()
-            delegate.app = self._app
-            menu.setDelegate_(delegate)
-            self._status_item.setMenu_(menu)
-            self._menu_delegate = delegate  # keep reference
-        except Exception:
-            pass
-
-    def update(self, state: ClientState):
-        """Called from Tk main thread on state change."""
-        if not self._ok:
-            return
-        self._set_color(state)
-        self._rebuild_menu()
-
-    def stop(self):
-        if self._status_item:
-            try:
-                AppKit = self._AppKit
-                AppKit.NSStatusBar.systemStatusBar().removeStatusItem_(
-                    self._status_item)
-            except Exception:
-                pass
-
-
-def _make_menu_delegate_class():
-    """Lazily create the NSMenuDelegate subclass (requires PyObjC)."""
     try:
         import AppKit
         import objc
 
-        class _MenuDelegate(AppKit.NSObject):
-            app = None  # set by TrayManager
+        class MenuTarget(AppKit.NSObject):
+            """Target for all NSMenuItem actions."""
+            app = None   # set by TrayIcon
 
-            @objc.python_method
-            def menuWillOpen_(self, menu):
-                pass
-
-            def menu_willHighlightItem_(self, menu, item):
-                pass
-
-            def menuDidClose_(self, menu):
-                pass
-
-            def menu_willActivateItem_(self, menu, item):
-                # Called when user clicks a menu item
-                key = item.representedObject()
-                if key is None:
+            def itemClicked_(self, sender):
+                key = sender.representedObject()
+                if not key or self.app is None:
                     return
+                app = self.app
                 if key == "__show__":
-                    self.app.after(0, self.app.deiconify)
+                    app.after(0, app.deiconify)
                 elif key == "__quit__":
-                    self.app.after(0, self.app._on_close)
+                    app.after(0, app._on_close)
                 else:
                     try:
                         idx = int(key)
-                        app = self.app
                         connected_name = (
                             app.client.status.server_name
                             if app.client.is_connected() else None
                         )
                         if idx < len(app.servers):
-                            server = app.servers[idx]
-                            if connected_name == server.name:
+                            if connected_name == app.servers[idx].name:
                                 app.after(0, app._disconnect)
                             else:
                                 app.after(0, lambda i=idx: app._connect_by_index(i))
                     except (ValueError, IndexError):
                         pass
 
-        return _MenuDelegate
+        class TrayIcon:
+            _COLOR_MAP = {
+                ClientState.DISCONNECTED: (0.40, 0.40, 0.40),
+                ClientState.CHECKING:     (0.80, 0.67, 0.00),
+                ClientState.CONNECTING:   (0.80, 0.67, 0.00),
+                ClientState.CONNECTED:    (0.31, 0.79, 0.69),
+                ClientState.ERROR:        (0.96, 0.28, 0.28),
+            }
+
+            def __init__(self, app):
+                self._app = app
+                self._AppKit = AppKit
+                self._status_item = None
+                self._target = None
+
+            def setup(self):
+                bar = AppKit.NSStatusBar.systemStatusBar()
+                self._status_item = bar.statusItemWithLength_(
+                    AppKit.NSVariableStatusItemLength)
+                self._status_item.setHighlightMode_(True)
+
+                # Create and keep a permanent target object
+                self._target = MenuTarget.alloc().init()
+                self._target.app = self._app
+
+                self._set_color(ClientState.DISCONNECTED)
+                self._rebuild_menu()
+
+            def _make_ns_image(self, r, g, b, size=18):
+                img = AppKit.NSImage.alloc().initWithSize_((size, size))
+                img.lockFocus()
+                color = AppKit.NSColor.colorWithCalibratedRed_green_blue_alpha_(
+                    r, g, b, 1.0)
+                color.set()
+                path = AppKit.NSBezierPath.bezierPathWithOvalInRect_(
+                    ((2, 2), (size - 4, size - 4)))
+                path.fill()
+                img.unlockFocus()
+                img.setTemplate_(False)
+                return img
+
+            def _set_color(self, state):
+                if not self._status_item:
+                    return
+                rgb = self._COLOR_MAP.get(state, (0.4, 0.4, 0.4))
+                img = self._make_ns_image(*rgb)
+                self._status_item.button().setImage_(img)
+                self._status_item.button().setTitle_("")
+
+            def _rebuild_menu(self):
+                if not self._status_item or not self._target:
+                    return
+                AppKit = self._AppKit
+                menu = AppKit.NSMenu.alloc().init()
+                menu.setAutoenablesItems_(False)
+
+                connected_name = (
+                    self._app.client.status.server_name
+                    if self._app.client.is_connected() else None
+                )
+
+                for i, server in enumerate(self._app.servers):
+                    is_conn = (connected_name == server.name)
+                    label = f"✓ {server.name}" if is_conn else f"   {server.name}"
+                    item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                        label, "itemClicked:", "")
+                    item.setTarget_(self._target)
+                    item.setRepresentedObject_(str(i))
+                    item.setEnabled_(True)
+                    menu.addItem_(item)
+
+                menu.addItem_(AppKit.NSMenuItem.separatorItem())
+
+                for label, key in [("Show Window", "__show__"), ("Quit", "__quit__")]:
+                    item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                        label, "itemClicked:", "")
+                    item.setTarget_(self._target)
+                    item.setRepresentedObject_(key)
+                    item.setEnabled_(True)
+                    menu.addItem_(item)
+
+                self._status_item.setMenu_(menu)
+
+            def update(self, state):
+                if not self._status_item:
+                    return
+                self._set_color(state)
+                self._rebuild_menu()
+
+            def stop(self):
+                if self._status_item:
+                    try:
+                        self._AppKit.NSStatusBar.systemStatusBar().removeStatusItem_(
+                            self._status_item)
+                    except Exception:
+                        pass
+
+        return TrayIcon, True
+
     except Exception:
-        return None
+        # PyObjC not available (Linux dev machine etc.)
+        class _NoopTray:
+            def __init__(self, app): pass
+            def setup(self): pass
+            def update(self, state): pass
+            def stop(self): pass
+        return _NoopTray, False
 
 
-_MenuDelegate = None
+_TrayClass = None
 
-def _get_menu_delegate():
-    global _MenuDelegate
-    if _MenuDelegate is None:
-        _MenuDelegate = _make_menu_delegate_class()
-    return _MenuDelegate
-
-
-# Monkey-patch TrayManager._rebuild_menu to use the lazy delegate
-_orig_rebuild = TrayManager._rebuild_menu
-
-def _rebuild_menu_patched(self):
-    if not self._status_item:
-        return
-    try:
-        AppKit = self._AppKit
-        _MD = _get_menu_delegate()
-        if _MD is None:
-            return
-
-        menu = AppKit.NSMenu.alloc().init()
-        connected_name = (
-            self._app.client.status.server_name
-            if self._app.client.is_connected() else None
-        )
-
-        for i, server in enumerate(self._app.servers):
-            is_conn = (connected_name == server.name)
-            label = f"✓ {server.name}" if is_conn else f"   {server.name}"
-            item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                label, None, "")
-            item.setRepresentedObject_(str(i))
-            menu.addItem_(item)
-
-        menu.addItem_(AppKit.NSMenuItem.separatorItem())
-
-        show_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Show Window", None, "")
-        show_item.setRepresentedObject_("__show__")
-        menu.addItem_(show_item)
-
-        quit_item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-            "Quit", None, "")
-        quit_item.setRepresentedObject_("__quit__")
-        menu.addItem_(quit_item)
-
-        delegate = _MD.alloc().init()
-        delegate.app = self._app
-        menu.setDelegate_(delegate)
-        self._status_item.setMenu_(menu)
-        self._menu_delegate = delegate
-    except Exception:
-        pass
-
-TrayManager._rebuild_menu = _rebuild_menu_patched
+def _get_tray_class():
+    global _TrayClass
+    if _TrayClass is None:
+        _TrayClass, _ = _build_tray_classes()
+    return _TrayClass
 
 
 class AddEditDialog(tk.Toplevel):
@@ -490,7 +417,6 @@ class TrustTunnelWindow(tk.Tk):
         self.servers: list[ServerProfile] = load_servers()
         self._selected_index: Optional[int] = None
         self._last_state: Optional[ClientState] = None
-        # Overlay buttons for the connect/disconnect column
         self._row_buttons: list[tk.Widget] = []
 
         self._build()
@@ -504,8 +430,7 @@ class TrustTunnelWindow(tk.Tk):
             self._log("   Install Homebrew Python: brew install python@3.11")
             self._log("   Then: /usr/local/bin/python3.11 -m src")
 
-        self._tray = TrayManager(self)
-        # Setup tray after the window is fully mapped (needs Tk mainloop running)
+        self._tray = _get_tray_class()(self)
         self.after(200, self._tray.setup)
 
         self._poll_status()
@@ -528,95 +453,10 @@ class TrustTunnelWindow(tk.Tk):
                                      fg="#888", font=("Helvetica", 10))
         self._status_text.pack(side="left", padx=4)
 
-        # ── Outer frame ──
-        outer = tk.Frame(self, bg=BG)
-        outer.pack(fill="both", expand=True, padx=8, pady=(4, 0))
-
-        # ── Console — fixed at bottom, OUTSIDE any paned window ──
-        # Pack it first so it's anchored to the bottom and never moves.
-        cons_wrap = tk.Frame(outer, bg=BG)
-        cons_wrap.pack(side="bottom", fill="x")
-
-        cons_frame = tk.LabelFrame(cons_wrap, text=" Console ", bg=BG, fg="#888",
-                                   font=("Helvetica", 9, "bold"), padx=4, pady=4)
-        cons_frame.pack(fill="both", expand=True)
-
-        cons_inner = tk.Frame(cons_frame, bg=CONSOLE_BG)
-        cons_inner.pack(fill="both", expand=True)
-
-        csb = ttk.Scrollbar(cons_inner, orient="vertical")
-        csb.pack(side="right", fill="y")
-
-        self._console = tk.Text(cons_inner, bg=CONSOLE_BG, fg="#a0a0a0",
-                                font=("Menlo", 10), wrap="word",
-                                state="disabled", relief="flat", borderwidth=0,
-                                insertbackground=FG, height=6,
-                                selectbackground="#3a5070",
-                                selectforeground="#ffffff",
-                                yscrollcommand=csb.set)
-        self._console.pack(fill="both", expand=True, side="left")
-        csb.configure(command=self._console.yview)
-
-        def _allow_copy(event):
-            if event.keysym in ("c", "C") and (event.state & 0x8 or event.state & 0x4):
-                return
-            return "break"
-        self._console.bind("<Key>", _allow_copy)
-        self._console.configure(cursor="arrow")
-
-        btn_row = tk.Frame(cons_frame, bg=CONSOLE_BG)
-        btn_row.pack(side="bottom", fill="x", padx=4, pady=2)
-        _make_button(btn_row, text="Copy All", command=self._copy_console,
-                     style="SmallDark.TButton").pack(side="right", padx=(2, 0))
-        _make_button(btn_row, text="Clear", command=self._clear_console,
-                     style="SmallDark.TButton").pack(side="right")
-
-        # ── Notebook — fills remaining space above console ──
-        nb_frame = tk.Frame(outer, bg=BG)
-        nb_frame.pack(side="top", fill="both", expand=True)
-
-        self._notebook = ttk.Notebook(nb_frame)
-        self._notebook.pack(fill="both", expand=True)
-
-        # ── Tab 1: Servers ──
-        servers_tab = tk.Frame(self._notebook, bg=BG)
-        self._notebook.add(servers_tab, text="Servers")
-
-        # Tree container — uses all available vertical space
-        tree_frame = tk.Frame(servers_tab, bg=BG)
-        tree_frame.pack(fill="both", expand=True)
-
-        # Columns: action button | name | hostname | address | username
-        # "btn" column is narrow (held by overlay buttons), rest are normal
-        cols = ("name", "hostname", "address", "username")
-        self._tree = ttk.Treeview(tree_frame, columns=cols,
-                                  show="headings", selectmode="browse")
-        self._tree.heading("name",     text="Server",   anchor="w")
-        self._tree.heading("hostname", text="Hostname", anchor="w")
-        self._tree.heading("address",  text="Address",  anchor="w")
-        self._tree.heading("username", text="Username", anchor="w")
-        # Leave room on the left for the overlay button column
-        self._tree.column("name",     width=180, minwidth=80)
-        self._tree.column("hostname", width=160, minwidth=80)
-        self._tree.column("address",  width=170, minwidth=80)
-        self._tree.column("username", width=110, minwidth=50)
-        self._tree.pack(fill="both", expand=True)
-
-        self._tree.bind("<<TreeviewSelect>>", self._on_server_select)
-        # Redraw overlay buttons whenever the tree is scrolled or resized
-        self._tree.bind("<Configure>",    lambda e: self.after(10, self._place_row_buttons))
-        self._tree.bind("<MouseWheel>",   lambda e: self.after(10, self._place_row_buttons))
-        self._tree.bind("<Button-4>",     lambda e: self.after(10, self._place_row_buttons))
-        self._tree.bind("<Button-5>",     lambda e: self.after(10, self._place_row_buttons))
-
-        # ── Canvas that sits ON TOP of the tree for overlay buttons ──
-        # The canvas is transparent (same bg as tree) and handles no events itself.
-        self._btn_canvas = tk.Frame(tree_frame, bg="#2d2d2d")
-        # placed via place() over the tree — see _place_row_buttons
-
-        # ── Servers tab button bar ──
-        servers_btn_bar = tk.Frame(servers_tab, bg=BG)
-        servers_btn_bar.pack(side="bottom", fill="x", pady=(4, 0))
+        # ── Servers button bar — packed LAST at bottom so PanedWindow
+        #    can never cover it regardless of sash position ──
+        servers_btn_bar = tk.Frame(self, bg=BG)
+        servers_btn_bar.pack(side="bottom", fill="x", padx=8, pady=(0, 4))
 
         _make_button(servers_btn_bar, text="+ Add",       command=self._add_server,
                      style="Dark.TButton").pack(side="left", padx=1)
@@ -626,6 +466,52 @@ class TrustTunnelWindow(tk.Tk):
                      style="Dark.TButton").pack(side="left", padx=1)
         _make_button(servers_btn_bar, text="Import Link", command=self._import_deeplink,
                      style="Dark.TButton").pack(side="left", padx=1)
+
+        # ── PanedWindow: notebook on top, console below — both resizable ──
+        self._pane = ttk.PanedWindow(self, orient="vertical")
+        self._pane.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+
+        # ── Top pane: notebook ──
+        nb_frame = tk.Frame(self._pane, bg=BG)
+        self._pane.add(nb_frame, weight=2)   # notebook gets 2/5
+
+        self._notebook = ttk.Notebook(nb_frame)
+        self._notebook.pack(fill="both", expand=True)
+
+        # ── Tab 1: Servers ──
+        servers_tab = tk.Frame(self._notebook, bg=BG)
+        self._notebook.add(servers_tab, text="Servers")
+
+        # tree_frame holds the Treeview + transparent overlay frame for buttons
+        tree_frame = tk.Frame(servers_tab, bg=BG)
+        tree_frame.pack(fill="both", expand=True)
+
+        cols = ("name", "hostname", "address", "username")
+        self._tree = ttk.Treeview(tree_frame, columns=cols,
+                                  show="headings", selectmode="browse")
+        self._tree.heading("name",     text="Server",   anchor="w")
+        self._tree.heading("hostname", text="Hostname", anchor="w")
+        self._tree.heading("address",  text="Address",  anchor="w")
+        self._tree.heading("username", text="Username", anchor="w")
+        self._tree.column("name",     width=200, minwidth=100)
+        self._tree.column("hostname", width=160, minwidth=80)
+        self._tree.column("address",  width=170, minwidth=80)
+        self._tree.column("username", width=110, minwidth=50)
+        self._tree.pack(fill="both", expand=True)
+
+        # Transparent overlay — a plain tk.Frame placed OVER the tree
+        # using .place(). Buttons are children of this frame, NOT of the
+        # Treeview, so the ttk theme cannot hijack their colors.
+        self._btn_overlay = tk.Frame(tree_frame, bg="#2d2d2d",
+                                     highlightthickness=0, bd=0)
+        # Initial placement; updated by _place_row_buttons
+        self._btn_overlay.place(x=0, y=0, width=0, height=0)
+
+        self._tree.bind("<<TreeviewSelect>>", self._on_server_select)
+        self._tree.bind("<Configure>",   lambda e: self.after(10, self._reposition_overlay))
+        self._tree.bind("<MouseWheel>",  lambda e: self.after(10, self._place_row_buttons))
+        self._tree.bind("<Button-4>",    lambda e: self.after(10, self._place_row_buttons))
+        self._tree.bind("<Button-5>",    lambda e: self.after(10, self._place_row_buttons))
 
         # ── Tab 2: Bypass ──
         bypass_tab = tk.Frame(self._notebook, bg=BG)
@@ -664,16 +550,74 @@ class TrustTunnelWindow(tk.Tk):
 
         self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-    # ── Overlay connect/disconnect buttons ────────────────────────
+        # ── Bottom pane: console ──
+        cons_frame = tk.LabelFrame(self._pane, text=" Console ", bg=BG, fg="#888",
+                                   font=("Helvetica", 9, "bold"), padx=4, pady=4)
+        self._pane.add(cons_frame, weight=3)   # console gets 3/5
+
+        cons_inner = tk.Frame(cons_frame, bg=CONSOLE_BG)
+        cons_inner.pack(fill="both", expand=True)
+
+        csb = ttk.Scrollbar(cons_inner, orient="vertical")
+        csb.pack(side="right", fill="y")
+
+        self._console = tk.Text(cons_inner, bg=CONSOLE_BG, fg="#a0a0a0",
+                                font=("Menlo", 10), wrap="word",
+                                state="disabled", relief="flat", borderwidth=0,
+                                insertbackground=FG,
+                                selectbackground="#3a5070",
+                                selectforeground="#ffffff",
+                                yscrollcommand=csb.set)
+        self._console.pack(fill="both", expand=True, side="left")
+        csb.configure(command=self._console.yview)
+
+        def _allow_copy(event):
+            if event.keysym in ("c", "C") and (event.state & 0x8 or event.state & 0x4):
+                return
+            return "break"
+        self._console.bind("<Key>", _allow_copy)
+        self._console.configure(cursor="arrow")
+
+        btn_row = tk.Frame(cons_frame, bg=CONSOLE_BG)
+        btn_row.pack(side="bottom", fill="x", padx=4, pady=2)
+        _make_button(btn_row, text="Copy All", command=self._copy_console,
+                     style="SmallDark.TButton").pack(side="right", padx=(2, 0))
+        _make_button(btn_row, text="Clear", command=self._clear_console,
+                     style="SmallDark.TButton").pack(side="right")
+
+        # Set initial sash position after window is drawn (40% notebook / 60% console)
+        self.after(50, self._set_initial_sash)
+
+    def _set_initial_sash(self):
+        try:
+            total = self._pane.winfo_height()
+            if total > 10:
+                self._pane.sashpos(0, int(total * 0.40))
+        except Exception:
+            self.after(100, self._set_initial_sash)
+
+    # ── Overlay buttons ───────────────────────────────────────────
+
+    def _reposition_overlay(self):
+        """Resize the overlay frame to cover the tree area, then redraw buttons."""
+        try:
+            x = self._tree.winfo_x()
+            y = self._tree.winfo_y()
+            w = self._tree.winfo_width()
+            h = self._tree.winfo_height()
+            self._btn_overlay.place(x=x, y=y, width=w, height=h)
+        except Exception:
+            pass
+        self._place_row_buttons()
 
     def _place_row_buttons(self):
         """
-        Place a real tk.Button over the 'name' column of each Treeview row.
-        The button shows 'Connect' (blue) or 'Disconnect' (red) and sits
-        at the right edge of the name column so the server name text is
-        still readable to its left.
+        Place tk.Button widgets inside _btn_overlay, aligned to each tree row.
+
+        Buttons are children of _btn_overlay (a plain tk.Frame), NOT of the
+        Treeview. This bypasses the ttk theme that would override bg/fg on
+        tk.Button children of ttk widgets on macOS.
         """
-        # Destroy old overlay buttons
         for w in self._row_buttons:
             try:
                 w.destroy()
@@ -687,42 +631,37 @@ class TrustTunnelWindow(tk.Tk):
         state = self.client.status.state
         is_busy = state in (ClientState.CONNECTING, ClientState.CHECKING)
 
+        # The overlay is positioned at (tree.x, tree.y) in the parent frame,
+        # so button coords are relative to the tree origin.
         name_col_width = self._tree.column("name", option="width")
-        btn_w = 90
-        btn_h = 22
+        btn_w, btn_h = 94, 22
 
         for iid in self._tree.get_children():
             bbox = self._tree.bbox(iid, "name")
             if not bbox:
-                continue   # row not visible (scrolled out)
+                continue
             x, y, col_w, row_h = bbox
+
             idx = int(iid)
+            if idx >= len(self.servers):
+                continue
             server = self.servers[idx]
             is_conn = (connected_name == server.name)
-            is_this_busy = is_busy and (connected_name == server.name)
+            this_busy = is_busy and (connected_name == server.name)
 
-            if is_this_busy:
-                text   = "…"
-                bg     = "#555500"
-                fg     = "#cca700"
-                abg    = "#555500"
+            if this_busy:
+                text, bg, fg, abg = "…",          "#444400", "#cca700", "#444400"
             elif is_conn:
-                text   = "Disconnect"
-                bg     = "#8B1A1A"
-                fg     = "#ffffff"
-                abg    = "#d63a3a"
+                text, bg, fg, abg = "Disconnect",  "#6b1212", "#ff8080", "#d63a3a"
             else:
-                text   = "Connect"
-                bg     = "#003d6e"
-                fg     = "#ffffff"
-                abg    = "#0078d4"
+                text, bg, fg, abg = "Connect",     "#003060", "#80c8ff", "#0078d4"
 
-            # Position: right edge of name column, vertically centered in row
-            bx = x + col_w - btn_w - 4
+            # Position at right edge of the name column, vertically centred
+            bx = x + col_w - btn_w - 6
             by = y + (row_h - btn_h) // 2
 
             btn = tk.Button(
-                self._tree,
+                self._btn_overlay,
                 text=text,
                 font=("Helvetica", 9, "bold"),
                 bg=bg, fg=fg,
@@ -755,8 +694,7 @@ class TrustTunnelWindow(tk.Tk):
             ), tags=(tag,))
         self._tree.tag_configure("connected", background="#1a3a2a", foreground=SUCCESS_GREEN)
         self._tree.tag_configure("busy",      background="#2a2a1a", foreground=WARNING_YELLOW)
-        # Schedule overlay button placement after Tk has laid out the rows
-        self.after(20, self._place_row_buttons)
+        self.after(20, self._reposition_overlay)
 
     def _save_and_refresh(self):
         save_servers(self.servers)
@@ -771,8 +709,7 @@ class TrustTunnelWindow(tk.Tk):
         connected_name = (
             self.client.status.server_name if self.client.is_connected() else None
         )
-        server = self.servers[idx]
-        if connected_name == server.name:
+        if connected_name == self.servers[idx].name:
             self._disconnect()
         else:
             self._connect_by_index(idx)
@@ -963,7 +900,6 @@ class TrustTunnelWindow(tk.Tk):
             self._status_dot.configure(text=dot, fg=color)
             self._status_text.configure(text=label, fg=color)
 
-            # Stream new log lines
             lines = status.log_lines
             if not hasattr(self, "_log_idx"):
                 self._log_idx = 0
@@ -971,7 +907,6 @@ class TrustTunnelWindow(tk.Tk):
                 self._log(line)
             self._log_idx = len(lines)
 
-            # On state change: refresh list + tray
             if state != self._last_state:
                 self._last_state = state
                 self._refresh_server_list()
