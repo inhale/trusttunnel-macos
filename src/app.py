@@ -158,13 +158,31 @@ def _build_tray_classes():
 
         class MenuTarget(AppKit.NSObject):
             """Target for all NSMenuItem actions."""
-            app = None   # set by TrayIcon
+
+            def init(self):
+                self = objc.super(MenuTarget, self).init()
+                if self is None:
+                    return None
+                self._app = None
+                return self
+
+            @property
+            def app(self):
+                return self._app
+
+            @app.setter
+            def app(self, value):
+                self._app = value
 
             def itemClicked_(self, sender):
-                key = sender.representedObject()
-                if not key or self.app is None:
+                try:
+                    raw = sender.representedObject()
+                    key = str(raw) if raw is not None else ""
+                except Exception:
+                    key = ""
+                if not key or self._app is None:
                     return
-                app = self.app
+                app = self._app
                 if key == "__show__":
                     app.after(0, app.deiconify)
                 elif key == "__quit__":
@@ -172,16 +190,17 @@ def _build_tray_classes():
                 else:
                     try:
                         idx = int(key)
-                        connected_name = (
-                            app.client.status.server_name
-                            if app.client.is_connected() else None
-                        )
-                        if idx < len(app.servers):
-                            if connected_name == app.servers[idx].name:
+                        servers = list(app.servers)  # snapshot to avoid race
+                        if idx < len(servers):
+                            connected_name = (
+                                app.client.status.server_name
+                                if app.client.is_connected() else None
+                            )
+                            if connected_name == servers[idx].name:
                                 app.after(0, app._disconnect)
                             else:
                                 app.after(0, lambda i=idx: app._connect_by_index(i))
-                    except (ValueError, IndexError):
+                    except Exception:
                         pass
 
         class TrayIcon:
@@ -685,15 +704,16 @@ class TrustTunnelWindow(tk.Tk):
             is_connected = (connected_name == s.name)
             is_busy = (state in (ClientState.CONNECTING, ClientState.CHECKING)
                        and connected_name == s.name)
-            tag = "connected" if is_connected else ("busy" if is_busy else "")
+            tag = "connected" if is_connected else ("busy" if is_busy else "normal")
             self._tree.insert("", "end", iid=str(i), values=(
                 s.name,
                 s.endpoint.hostname,
                 ",".join(s.endpoint.addresses) if s.endpoint.addresses else "",
                 s.endpoint.username,
             ), tags=(tag,))
-        self._tree.tag_configure("connected", background="#1a3a2a", foreground=SUCCESS_GREEN)
-        self._tree.tag_configure("busy",      background="#2a2a1a", foreground=WARNING_YELLOW)
+        self._tree.tag_configure("normal",    background="#2d2d2d",  foreground="#d4d4d4")
+        self._tree.tag_configure("connected", background="#1a3a2a",  foreground=SUCCESS_GREEN)
+        self._tree.tag_configure("busy",      background="#2a2a1a",  foreground=WARNING_YELLOW)
         self.after(20, self._reposition_overlay)
 
     def _save_and_refresh(self):
