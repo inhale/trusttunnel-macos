@@ -94,6 +94,21 @@ fi
 
 echo "Python: $PYTHON (Tk $("$PYTHON" -c "import tkinter; print(tkinter.TkVersion)"))"
 
+# Verify _tkinter C extension is present (not just the pure-Python wrapper)
+if ! "$PYTHON" -c "import _tkinter" 2>/dev/null; then
+    echo ""
+    echo "ERROR: _tkinter C extension missing from $PYTHON"
+    echo "The .app will crash on launch with 'No module named tkinter'."
+    echo ""
+    echo "Fix (Homebrew):"
+    echo "  brew install python-tk@3.11"
+    echo "  # then re-run with the python-tk python:"
+    echo "  /usr/local/opt/python-tk@3.11/bin/python3.11 build-app.sh  (Intel)"
+    echo "  /opt/homebrew/opt/python-tk@3.11/bin/python3.11 build-app.sh  (Apple Silicon)"
+    exit 1
+fi
+echo "  _tkinter C extension: ok"
+
 # 2. Install build deps
 echo ""
 echo "=== Installing build dependencies ==="
