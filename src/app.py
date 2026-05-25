@@ -63,7 +63,41 @@ def _make_entry(parent, **kwargs):
     return w
 
 
-# ── ttk style setup ───────────────────────────────────────────────
+# ── Button factory (handles Tk 8.5 vs 8.6) ────────────────────────
+# On Tk 8.5 the 'default' theme ignores custom style backgrounds/foregrounds
+# on buttons — they render invisibly or with zero hit area.
+# Fall back to plain tk.Button with explicit colours on 8.5.
+
+_BUTTON_STYLES = {
+    # style_name: (bg, fg, active_bg, font)
+    "Accent.TButton":    ("#0078d4", "#ffffff", "#1a8ae8", ("Helvetica", 11, "bold")),
+    "Dark.TButton":      ("#3a3a3a", "#ffffff", "#4a4a4a", ("Helvetica", 11)),
+    "Red.TButton":       ("#f44747", "#ffffff", "#d63a3a", ("Helvetica", 11, "bold")),
+    "SmallDark.TButton": ("#3a3a3a", "#ffffff", "#4a4a4a", ("Helvetica", 9)),
+}
+
+def _make_button(parent, text, command, style="Dark.TButton", **kwargs):
+    """Create a Button that works on both Tk 8.5 and 8.6.
+
+    On Tk 8.6+: uses ttk.Button with the given named style.
+    On Tk 8.5:  uses tk.Button with explicit bg/fg colours because ttk
+                custom styles render invisible/unclickable on macOS Tk 8.5.
+    """
+    if _TK_VERSION >= 8.6:
+        return ttk.Button(parent, text=text, command=command,
+                          style=style, **kwargs)
+    # Tk 8.5 fallback — plain tk.Button with hardcoded colours
+    bg, fg, active_bg, font = _BUTTON_STYLES.get(
+        style, ("#3a3a3a", "#ffffff", "#4a4a4a", ("Helvetica", 11))
+    )
+    return tk.Button(
+        parent, text=text, command=command,
+        bg=bg, fg=fg, activebackground=active_bg, activeforeground=fg,
+        font=font, relief="flat", borderwidth=0, cursor="hand2",
+        **kwargs,
+    )
+
+
 def _setup_styles():
     style = ttk.Style()
     style.theme_use("default")  # 'aqua' has issues with custom colours
@@ -210,11 +244,11 @@ class AddEditDialog(tk.Toplevel):
         btn_frame = tk.Frame(form, bg="#2a2a2a")
         btn_frame.pack(fill="x", pady=(16, 0))
 
-        ttk.Button(btn_frame, text="Cancel", command=self.destroy,
-                   style="Dark.TButton").pack(side="left", padx=(0, 10))
+        _make_button(btn_frame, text="Cancel", command=self.destroy,
+                     style="Dark.TButton").pack(side="left", padx=(0, 10))
 
-        ttk.Button(btn_frame, text="Save", command=self._save,
-                   style="Accent.TButton").pack(side="left")
+        _make_button(btn_frame, text="Save", command=self._save,
+                     style="Accent.TButton").pack(side="left")
 
     def _save(self):
         name = self._entries["name"].get().strip()
@@ -369,11 +403,11 @@ class TrustTunnelWindow(tk.Tk):
         self._bypass_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self._bypass_entry.bind("<Return>", lambda e: self._add_exclusion())
 
-        ttk.Button(exc_ctrl, text="Add", command=self._add_exclusion,
-                   style="Accent.TButton").pack(side="left", padx=2)
+        _make_button(exc_ctrl, text="Add", command=self._add_exclusion,
+                     style="Accent.TButton").pack(side="left", padx=2)
 
-        ttk.Button(exc_ctrl, text="Delete", command=self._delete_exclusion,
-                   style="Dark.TButton").pack(side="left", padx=2)
+        _make_button(exc_ctrl, text="Delete", command=self._delete_exclusion,
+                     style="Dark.TButton").pack(side="left", padx=2)
 
         self._bypass_status = tk.Label(bypass_tab, bg=BG, fg="#888",
                                        text="Select a server to manage bypass rules.",
@@ -387,23 +421,23 @@ class TrustTunnelWindow(tk.Tk):
         btn_bar = tk.Frame(self, bg=BG)
         btn_bar.pack(fill="x", padx=8, pady=(4, 0))
 
-        ttk.Button(btn_bar, text="+ Add", command=self._add_server,
-                   style="Dark.TButton").pack(side="left", padx=1)
-        ttk.Button(btn_bar, text="Edit", command=self._edit_server,
-                   style="Dark.TButton").pack(side="left", padx=1)
-        ttk.Button(btn_bar, text="Delete", command=self._delete_server,
-                   style="Dark.TButton").pack(side="left", padx=1)
-        ttk.Button(btn_bar, text="Import Link", command=self._import_deeplink,
-                   style="Dark.TButton").pack(side="left", padx=1)
+        _make_button(btn_bar, text="+ Add", command=self._add_server,
+                     style="Dark.TButton").pack(side="left", padx=1)
+        _make_button(btn_bar, text="Edit", command=self._edit_server,
+                     style="Dark.TButton").pack(side="left", padx=1)
+        _make_button(btn_bar, text="Delete", command=self._delete_server,
+                     style="Dark.TButton").pack(side="left", padx=1)
+        _make_button(btn_bar, text="Import Link", command=self._import_deeplink,
+                     style="Dark.TButton").pack(side="left", padx=1)
 
-        self._btn_connect = ttk.Button(btn_bar, text="Connect",
-                                       command=self._connect_selected,
-                                       style="Accent.TButton")
+        self._btn_connect = _make_button(btn_bar, text="Connect",
+                                         command=self._connect_selected,
+                                         style="Accent.TButton")
         self._btn_connect.pack(side="right", padx=2)
 
-        self._btn_disconnect = ttk.Button(btn_bar, text="Disconnect",
-                                          command=self._disconnect,
-                                          style="Red.TButton")
+        self._btn_disconnect = _make_button(btn_bar, text="Disconnect",
+                                            command=self._disconnect,
+                                            style="Red.TButton")
 
         # ── Console (bottom pane of PanedWindow) ──
         cons_frame = tk.LabelFrame(self._main_pane, text=" Console ", bg=BG, fg="#888",
@@ -423,9 +457,9 @@ class TrustTunnelWindow(tk.Tk):
         csb.pack(side="right", fill="y")
         self._console.configure(yscrollcommand=csb.set)
 
-        ttk.Button(cons_frame, text="Clear", command=self._clear_console,
-                   style="SmallDark.TButton").pack(side="bottom", anchor="e",
-                                                   padx=4, pady=2)
+        _make_button(cons_frame, text="Clear", command=self._clear_console,
+                     style="SmallDark.TButton").pack(side="bottom", anchor="e",
+                                                     padx=4, pady=2)
 
     # ── CRUD ──────────────────────────────────────────────────────
 
@@ -575,10 +609,10 @@ class TrustTunnelWindow(tk.Tk):
 
         bf = tk.Frame(f, bg="#252525")
         bf.pack(fill="x", pady=(8, 0))
-        ttk.Button(bf, text="Cancel", command=dlg.destroy,
-                   style="Dark.TButton").pack(side="left", padx=(0, 10))
-        ttk.Button(bf, text="Import", command=do_import,
-                   style="Accent.TButton").pack(side="left")
+        _make_button(bf, text="Cancel", command=dlg.destroy,
+                     style="Dark.TButton").pack(side="left", padx=(0, 10))
+        _make_button(bf, text="Import", command=do_import,
+                     style="Accent.TButton").pack(side="left")
 
     # ── Connection ─────────────────────────────────────────────────
 
