@@ -79,7 +79,8 @@ NOTES="## Installation
    \`\`\`
 4. Launch TrustTunnel from /Applications or Spotlight
 
-> No Python, Homebrew, or Xcode required — the app is fully self-contained."
+> No Python, Homebrew, or Xcode required — the app is fully self-contained.
+> The app is ad-hoc signed; no Gatekeeper warning on first launch."
 
 # ── Publish ─────────────────────────────────────────────────────────────────
 

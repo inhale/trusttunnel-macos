@@ -204,10 +204,23 @@ echo ""
 echo "=== Building .app ==="
 "$PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm 2>&1
 
-# 5. Result + install
+# 5. Ad-hoc codesign (silences Gatekeeper "unverified developer" dialog)
+echo ""
+echo "=== Signing .app (ad-hoc) ==="
+APP="dist/TrustTunnel.app"
+if codesign --force --deep --sign - "$APP" 2>&1; then
+    echo "  Signed (ad-hoc): $APP"
+    # Strip quarantine flag in case it was set during build
+    xattr -cr "$APP" 2>/dev/null || true
+else
+    echo "  WARNING: codesign failed — app will show Gatekeeper warning on first launch."
+    echo "  Users can bypass: System Settings → Privacy & Security → Open Anyway"
+    echo "  Or: xattr -cr /Applications/TrustTunnel.app"
+fi
+
+# 6. Result + install
 echo ""
 echo "=== Done ==="
-APP="dist/TrustTunnel.app"
 if [ -d "$APP" ]; then
     SIZE=$(du -sh "$APP" | cut -f1)
     echo "App:  $SCRIPT_DIR/$APP  ($SIZE)"
