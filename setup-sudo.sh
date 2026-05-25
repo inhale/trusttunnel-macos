@@ -5,7 +5,16 @@
 
 set -euo pipefail
 
-APP_CLI="/Applications/TrustTunnel.app/Contents/Resources/bin/trusttunnel_client"
+# All paths where PyInstaller may place the binary depending on version:
+#   PyInstaller 6.x COLLECT mode: Contents/MacOS/_internal/bin/
+#   PyInstaller 5.x COLLECT mode: Contents/MacOS/bin/
+#   Legacy / Resources layout:    Contents/Resources/bin/
+APP_DIR="/Applications/TrustTunnel.app/Contents"
+APP_CLI_CANDIDATES=(
+    "$APP_DIR/MacOS/_internal/bin/trusttunnel_client"
+    "$APP_DIR/MacOS/bin/trusttunnel_client"
+    "$APP_DIR/Resources/bin/trusttunnel_client"
+)
 BREW_CLI="/usr/local/bin/trusttunnel_client"
 OPT_CLI="/opt/trusttunnel_client/trusttunnel_client"
 SUDOERS_FILE="/etc/sudoers.d/trusttunnel"
@@ -16,19 +25,32 @@ echo "TrustTunnel needs root to create a virtual network interface (utun)."
 echo "This script adds passwordless sudo for the trusttunnel_client binary."
 echo ""
 
-# Find the binary
+# Find the binary — check .app candidates first
 CLI_PATH=""
-if [ -f "$APP_CLI" ]; then
-    CLI_PATH="$APP_CLI"
-elif [ -f "$BREW_CLI" ]; then
-    CLI_PATH="$BREW_CLI"
-elif [ -f "$OPT_CLI" ]; then
-    CLI_PATH="$OPT_CLI"
+for candidate in "${APP_CLI_CANDIDATES[@]}"; do
+    if [ -f "$candidate" ]; then
+        CLI_PATH="$candidate"
+        break
+    fi
+done
+
+# Fall back to system installs
+if [ -z "$CLI_PATH" ]; then
+    if [ -f "$BREW_CLI" ]; then
+        CLI_PATH="$BREW_CLI"
+    elif [ -f "$OPT_CLI" ]; then
+        CLI_PATH="$OPT_CLI"
+    fi
 fi
 
 if [ -z "$CLI_PATH" ]; then
     echo "ERROR: trusttunnel_client not found."
-    echo "Searched: $APP_CLI, $BREW_CLI, $OPT_CLI"
+    echo "Searched:"
+    for p in "${APP_CLI_CANDIDATES[@]}"; do echo "  $p"; done
+    echo "  $BREW_CLI"
+    echo "  $OPT_CLI"
+    echo ""
+    echo "Make sure TrustTunnel.app is installed to /Applications first."
     exit 1
 fi
 

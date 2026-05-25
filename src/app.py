@@ -452,17 +452,33 @@ class TrustTunnelWindow(tk.Tk):
                                 font=("Menlo", 10), wrap="word",
                                 state="disabled", relief="flat",
                                 borderwidth=4, insertbackground=FG,
-                                height=7)
+                                height=7,
+                                selectbackground="#3a5070",
+                                selectforeground="#ffffff")
         self._console.pack(fill="both", expand=True, side="left")
+        # Allow text selection and copy while keeping the widget read-only.
+        # On macOS, state="disabled" blocks even selection — bind the standard
+        # copy shortcuts explicitly so testers can copy error messages.
+        def _allow_copy(event):
+            # Let Ctrl-C / Cmd-C through; block everything else that would edit
+            if event.keysym in ("c", "C") and (event.state & 0x8 or event.state & 0x4):
+                return  # allow copy
+            return "break"
+        self._console.bind("<Key>", _allow_copy)
+        # Also ensure clicking/dragging to select works (re-enable cursor)
+        self._console.configure(cursor="arrow")
 
         csb = ttk.Scrollbar(cons_frame, orient="vertical",
                            command=self._console.yview)
         csb.pack(side="right", fill="y")
         self._console.configure(yscrollcommand=csb.set)
 
-        _make_button(cons_frame, text="Clear", command=self._clear_console,
-                     style="SmallDark.TButton").pack(side="bottom", anchor="e",
-                                                     padx=4, pady=2)
+        btn_row = tk.Frame(cons_frame, bg=CONSOLE_BG)
+        btn_row.pack(side="bottom", fill="x", padx=4, pady=2)
+        _make_button(btn_row, text="Copy All", command=self._copy_console,
+                     style="SmallDark.TButton").pack(side="right", padx=(2, 0))
+        _make_button(btn_row, text="Clear", command=self._clear_console,
+                     style="SmallDark.TButton").pack(side="right")
 
     # ── CRUD ──────────────────────────────────────────────────────
 
@@ -661,6 +677,13 @@ class TrustTunnelWindow(tk.Tk):
         self._console.configure(state="normal")
         self._console.delete("1.0", "end")
         self._console.configure(state="disabled")
+
+    def _copy_console(self):
+        """Copy all console text to the system clipboard."""
+        text = self._console.get("1.0", "end-1c")
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update()  # flush clipboard on macOS
 
     # ── Polling ────────────────────────────────────────────────────
 

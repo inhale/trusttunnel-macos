@@ -132,10 +132,18 @@ class ClientManager:
         self._set_phase(ConnectPhase.FINDING_BINARY)
         for path in CLIENT_BINARY_PATHS:
             if os.path.isfile(path) and os.access(path, os.X_OK):
+                with self._lock:
+                    self._status.log_lines.append(
+                        f"[{_ts()}] binary: {path}"
+                    )
                 return path
         for path in os.environ.get("PATH", "").split(":"):
             candidate = os.path.join(path, "trusttunnel_client")
             if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                with self._lock:
+                    self._status.log_lines.append(
+                        f"[{_ts()}] binary: {candidate}"
+                    )
                 return candidate
         return None
 
