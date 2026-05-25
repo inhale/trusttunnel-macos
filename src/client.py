@@ -140,21 +140,28 @@ class ClientManager:
         return None
 
     def _check_sudo(self) -> tuple[bool, str]:
-        """Verify sudo is available (non-interactive check)."""
+        """Verify passwordless sudo works for the trusttunnel_client binary."""
         self._set_phase(ConnectPhase.CHECKING_SUDO)
+        binary = self._find_binary()
+        if not binary:
+            return False, "trusttunnel_client binary not found (cannot test sudo)"
         try:
             result = subprocess.run(
-                ["sudo", "-n", "true"],
+                ["sudo", "-n", binary, "--version"],
                 capture_output=True, text=True, timeout=5,
             )
             if result.returncode == 0:
                 return True, "sudo available (passwordless)"
             else:
+                import getpass as _gp
+                try:
+                    user = _gp.getuser()
+                except Exception:
+                    user = "YOUR_USER"
                 return False, (
                     "sudo requires a password or is not configured.\n\n"
                     "Fix: add this line to /etc/sudoers via 'sudo visudo':\n"
-                    "  YOUR_USER  ALL=(ALL) NOPASSWD: /usr/local/bin/trusttunnel_client, "
-                    "/opt/trusttunnel_client/trusttunnel_client\n\n"
+                    f"  {user}  ALL=(ALL) NOPASSWD: {binary}\n\n"
                     f"stderr: {result.stderr.strip()}"
                 )
         except FileNotFoundError:
