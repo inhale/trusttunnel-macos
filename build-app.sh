@@ -219,21 +219,10 @@ if [ -d "$APP" ]; then
         cp -R "$APP" /Applications/
         echo "  → Copied to /Applications/TrustTunnel.app"
 
-        # Auto-configure sudo if not already done
-        SUDOERS="/etc/sudoers.d/trusttunnel"
-        if [ -f "$SUDOERS" ] && grep -q "trusttunnel_client" "$SUDOERS" 2>/dev/null; then
-            echo "  → Sudo already configured."
-        else
-            echo ""
-            echo "  TrustTunnel needs root to create a virtual network interface."
-            echo "  Configure passwordless sudo for the VPN client?"
-            read -p "  [Y/n]: " sudo_ans
-            if [ "${sudo_ans:-y}" = "y" ] || [ "${sudo_ans:-y}" = "Y" ] || [ -z "$sudo_ans" ]; then
-                "$SCRIPT_DIR/setup-sudo.sh"
-            else
-                echo "  (Skipped. Run ./setup-sudo.sh later.)"
-            fi
-        fi
+        # Auto-configure sudo (always run to ensure correct binary path)
+        echo ""
+        echo "  Configuring passwordless sudo for VPN client..."
+        "$SCRIPT_DIR/setup-sudo.sh"
     else
         echo "  To install later: cp -r \"$APP\" /Applications/"
     fi
