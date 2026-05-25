@@ -72,13 +72,7 @@ def _make_button(parent, text, command, style="Dark.TButton", **kwargs):
 # ── Styles ─────────────────────────────────────────────────────────
 def _setup_styles():
     style = ttk.Style()
-    # "clam" is the only ttk theme that reliably respects Treeview foreground
-    # on macOS. "default" and "aqua" both ignore tag_configure/style.map
-    # foreground for unselected rows — text renders as dark grey invisibly.
-    try:
-        style.theme_use("clam")
-    except Exception:
-        style.theme_use("default")
+    style.theme_use("default")
 
     style.configure("Dark.TFrame",      background="#1e1e1e")
     style.configure("Dark.TLabel",      background="#1e1e1e", foreground="#d4d4d4")
@@ -114,11 +108,9 @@ def _setup_styles():
                     fieldbackground="#2d2d2d", rowheight=32, borderwidth=0)
     style.configure("Treeview.Heading", background="#3a3a3a", foreground="#d4d4d4",
                     relief="flat", borderwidth=0, font=("Helvetica", 10, "bold"))
-    # macOS aqua theme overrides foreground even after configure() — must use
-    # style.map to force the color for every widget state including the default.
     style.map("Treeview",
-              background=[("selected", "#0078d4"), ("!selected", "#2d2d2d")],
-              foreground=[("selected", "white"),   ("!selected", "#d4d4d4")])
+              background=[("selected", "#0078d4")],
+              foreground=[("selected", "white")])
 
     style.configure("TNotebook", background="#1e1e1e", borderwidth=0)
     style.configure("TNotebook.Tab", background="#2a2a2a", foreground="#d4d4d4",
@@ -159,55 +151,57 @@ def _build_tray_classes():
     """
     Build and return (TrayIcon class, available bool).
     Called once lazily so import errors on Linux are silenced.
-
-    THREADING DESIGN
-    ----------------
-    itemClicked_ is called by AppKit on whatever thread it pleases.
-    Calling any Tk API (including app.after()) from a non-Tk thread
-    without the GIL held causes 'PyEval_RestoreThread: GIL released'
-    abort (seen in practice with PyObjC 9+).
-
-    performSelectorOnMainThread doesn't work either because PyObjC
-    only exposes Python methods to ObjC if they follow strict naming
-    conventions — _dispatch_: raises NSInvalidArgumentException.
-
-    Safe solution: use an os.pipe as a lock-free message queue.
-    itemClicked_ writes the key string to the write end (os.write is
-    signal-safe and needs no GIL). The Tk mainloop polls the read end
-    every 50 ms via after() on the main thread, reads the key, and
-    dispatches — fully inside the Tk thread with the GIL held.
     """
     try:
         import AppKit
         import objc
-        import os as _os
 
         class MenuTarget(AppKit.NSObject):
-            """Receives NSMenuItem clicks; communicates back via a pipe."""
+            """Target for all NSMenuItem actions."""
 
             def init(self):
                 self = objc.super(MenuTarget, self).init()
                 if self is None:
                     return None
-                self._pipe_w = None   # write end; set by TrayIcon.setup()
+                self._app = None
                 return self
 
+            @property
+            def app(self):
+                return self._app
+
+            @app.setter
+            def app(self, value):
+                self._app = value
+
             def itemClicked_(self, sender):
-                # Pure Python + os.write — safe to call without GIL
-                if self._pipe_w is None:
-                    return
                 try:
                     raw = sender.representedObject()
                     key = str(raw) if raw is not None else ""
                 except Exception:
                     key = ""
-                if not key:
+                if not key or self._app is None:
                     return
-                try:
-                    data = (key + "\n").encode()
-                    _os.write(self._pipe_w, data)
-                except Exception:
-                    pass
+                app = self._app
+                if key == "__show__":
+                    app.after(0, app.deiconify)
+                elif key == "__quit__":
+                    app.after(0, app._on_close)
+                else:
+                    try:
+                        idx = int(key)
+                        servers = list(app.servers)  # snapshot to avoid race
+                        if idx < len(servers):
+                            connected_name = (
+                                app.client.status.server_name
+                                if app.client.is_connected() else None
+                            )
+                            if connected_name == servers[idx].name:
+                                app.after(0, app._disconnect)
+                            else:
+                                app.after(0, lambda i=idx: app._connect_by_index(i))
+                    except Exception:
+                        pass
 
         class TrayIcon:
             _COLOR_MAP = {
@@ -223,8 +217,6 @@ def _build_tray_classes():
                 self._AppKit = AppKit
                 self._status_item = None
                 self._target = None
-                self._pipe_r = None
-                self._pipe_w = None
 
             def setup(self):
                 bar = AppKit.NSStatusBar.systemStatusBar()
@@ -232,59 +224,12 @@ def _build_tray_classes():
                     AppKit.NSVariableStatusItemLength)
                 self._status_item.setHighlightMode_(True)
 
-                # Pipe: itemClicked_ writes, Tk polls the read end
-                self._pipe_r, self._pipe_w = _os.pipe()
-
                 # Create and keep a permanent target object
                 self._target = MenuTarget.alloc().init()
-                self._target._pipe_w = self._pipe_w
+                self._target.app = self._app
 
                 self._set_color(ClientState.DISCONNECTED)
                 self._rebuild_menu()
-
-                # Start polling the pipe from the Tk main thread
-                self._app.after(50, self._poll_pipe)
-
-            def _poll_pipe(self):
-                """Read any pending keys from the pipe and dispatch. Tk main thread only."""
-                import select
-                try:
-                    if self._pipe_r is None:
-                        return
-                    ready, _, _ = select.select([self._pipe_r], [], [], 0)
-                    if ready:
-                        data = _os.read(self._pipe_r, 4096).decode(errors="ignore")
-                        for key in data.strip().splitlines():
-                            key = key.strip()
-                            if not key:
-                                continue
-                            app = self._app
-                            if key == "__show__":
-                                app.deiconify()
-                            elif key == "__quit__":
-                                app._on_close()
-                            else:
-                                try:
-                                    idx = int(key)
-                                    servers = list(app.servers)
-                                    if idx < len(servers):
-                                        connected_name = (
-                                            app.client.status.server_name
-                                            if app.client.is_connected() else None
-                                        )
-                                        if connected_name == servers[idx].name:
-                                            app._disconnect()
-                                        else:
-                                            app._connect_by_index(idx)
-                                except Exception:
-                                    pass
-                except Exception:
-                    pass
-                # Keep polling
-                try:
-                    self._app.after(50, self._poll_pipe)
-                except Exception:
-                    pass
 
             def _make_ns_image(self, r, g, b, size=18):
                 img = AppKit.NSImage.alloc().initWithSize_((size, size))
@@ -354,14 +299,6 @@ def _build_tray_classes():
                             self._status_item)
                     except Exception:
                         pass
-                for fd in (self._pipe_r, self._pipe_w):
-                    try:
-                        if fd is not None:
-                            _os.close(fd)
-                    except Exception:
-                        pass
-                self._pipe_r = None
-                self._pipe_w = None
 
         return TrayIcon, True
 
