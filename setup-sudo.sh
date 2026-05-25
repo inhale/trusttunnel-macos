@@ -40,46 +40,22 @@ REAL_USER="${SUDO_USER:-${USER:-$(id -un)}}"
 echo "Configuring sudo for user: $REAL_USER"
 echo ""
 
+# Write sudoers file via tee (avoids any shell quoting/newline issues)
 SUDOERS_LINE="$REAL_USER ALL=(ALL) NOPASSWD: $CLI_PATH"
-SUDOERS_CONTENT="# TrustTunnel VPN — passwordless sudo for the client binary
-$SUDOERS_LINE
-"
 
-_write_sudoers() {
-    # Called as root (either directly or via sudo below)
-    printf '%s' "$SUDOERS_CONTENT" > "$SUDOERS_FILE"
-    chmod 440 "$SUDOERS_FILE"
-    if visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1; then
-        echo "✓ Done! $REAL_USER can now run $CLI_PATH without a password."
-        echo ""
-        echo "To verify:"
-        echo "  sudo -n $CLI_PATH --version"
-    else
-        echo "ERROR: sudoers syntax error. Removing file."
-        rm -f "$SUDOERS_FILE"
-        exit 1
-    fi
-}
+echo "Need sudo to write $SUDOERS_FILE (you will be prompted for your password):"
+printf '# TrustTunnel VPN — passwordless sudo for the client binary\n%s\n' "$SUDOERS_LINE" \
+    | sudo tee "$SUDOERS_FILE" > /dev/null
+sudo chmod 440 "$SUDOERS_FILE"
 
-if [ "$(id -u)" -eq 0 ]; then
-    # Already root
-    _write_sudoers
+# Verify syntax
+if sudo visudo -c -f "$SUDOERS_FILE" >/dev/null 2>&1; then
+    echo "✓ Done! $REAL_USER can now run $CLI_PATH without a password."
+    echo ""
+    echo "To verify:"
+    echo "  sudo -n $CLI_PATH --version"
 else
-    # Need privilege — pass everything via environment, no file re-exec
-    echo "Need sudo to write $SUDOERS_FILE (you will be prompted for your password):"
-    sudo bash -c "
-        SUDOERS_FILE='$SUDOERS_FILE'
-        REAL_USER='$REAL_USER'
-        CLI_PATH='$CLI_PATH'
-        SUDOERS_CONTENT='$SUDOERS_CONTENT'
-        printf '%s' \"\$SUDOERS_CONTENT\" > \"\$SUDOERS_FILE\"
-        chmod 440 \"\$SUDOERS_FILE\"
-        if visudo -c -f \"\$SUDOERS_FILE\" >/dev/null 2>&1; then
-            echo \"✓ Done! \$REAL_USER can now run \$CLI_PATH without a password.\"
-        else
-            echo 'ERROR: sudoers syntax error. Removing file.'
-            rm -f \"\$SUDOERS_FILE\"
-            exit 1
-        fi
-    "
+    echo "ERROR: sudoers syntax error. Removing file."
+    sudo rm -f "$SUDOERS_FILE"
+    exit 1
 fi
