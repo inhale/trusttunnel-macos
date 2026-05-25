@@ -140,12 +140,11 @@ WARNING_YELLOW = "#cca700"
 # The Tk mainloop on macOS pumps AppKit events, so NSStatusItem calls
 # work fine from the main thread via after().
 #
-# KEY FIX for clickable menu items:
-#   NSMenuItem with action=None is DISABLED by AppKit — it renders greyed
-#   and won't fire any delegate callbacks.  Each item must have a real
-#   selector set via setAction_() pointing to a method on a target object
-#   set via setTarget_().  We use a single MenuTarget NSObject whose
-#   itemClicked_() method dispatches by representedObject index.
+# THREADING: itemClicked_ can be called on any AppKit thread. Calling
+# Tk APIs (incl. after()) from there without the GIL held causes a
+# fatal abort. Fix: itemClicked_ only does os.write() to a pipe (no
+# GIL needed). TrayIcon._poll_pipe() reads the pipe every 50ms from
+# the Tk main thread and dispatches safely.
 
 def _build_tray_classes():
     """
@@ -155,53 +154,34 @@ def _build_tray_classes():
     try:
         import AppKit
         import objc
+        import os as _os
+        import select as _select
 
         class MenuTarget(AppKit.NSObject):
-            """Target for all NSMenuItem actions."""
+            """Receives NSMenuItem clicks; sends key via pipe to Tk thread."""
 
             def init(self):
                 self = objc.super(MenuTarget, self).init()
                 if self is None:
                     return None
-                self._app = None
+                self._pipe_w = None
                 return self
 
-            @property
-            def app(self):
-                return self._app
-
-            @app.setter
-            def app(self, value):
-                self._app = value
-
             def itemClicked_(self, sender):
+                # os.write is async-signal-safe — no GIL required
+                if self._pipe_w is None:
+                    return
                 try:
                     raw = sender.representedObject()
                     key = str(raw) if raw is not None else ""
                 except Exception:
                     key = ""
-                if not key or self._app is None:
+                if not key:
                     return
-                app = self._app
-                if key == "__show__":
-                    app.after(0, app.deiconify)
-                elif key == "__quit__":
-                    app.after(0, app._on_close)
-                else:
-                    try:
-                        idx = int(key)
-                        servers = list(app.servers)  # snapshot to avoid race
-                        if idx < len(servers):
-                            connected_name = (
-                                app.client.status.server_name
-                                if app.client.is_connected() else None
-                            )
-                            if connected_name == servers[idx].name:
-                                app.after(0, app._disconnect)
-                            else:
-                                app.after(0, lambda i=idx: app._connect_by_index(i))
-                    except Exception:
-                        pass
+                try:
+                    _os.write(self._pipe_w, (key + "\n").encode())
+                except Exception:
+                    pass
 
         class TrayIcon:
             _COLOR_MAP = {
@@ -217,6 +197,8 @@ def _build_tray_classes():
                 self._AppKit = AppKit
                 self._status_item = None
                 self._target = None
+                self._pipe_r = None
+                self._pipe_w = None
 
             def setup(self):
                 bar = AppKit.NSStatusBar.systemStatusBar()
@@ -224,12 +206,55 @@ def _build_tray_classes():
                     AppKit.NSVariableStatusItemLength)
                 self._status_item.setHighlightMode_(True)
 
-                # Create and keep a permanent target object
+                # Pipe: itemClicked_ writes, Tk polls read end
+                self._pipe_r, self._pipe_w = _os.pipe()
+
                 self._target = MenuTarget.alloc().init()
-                self._target.app = self._app
+                self._target._pipe_w = self._pipe_w
 
                 self._set_color(ClientState.DISCONNECTED)
                 self._rebuild_menu()
+
+                # Start polling pipe from Tk main thread
+                self._app.after(50, self._poll_pipe)
+
+            def _poll_pipe(self):
+                try:
+                    if self._pipe_r is None:
+                        return
+                    ready, _, _ = _select.select([self._pipe_r], [], [], 0)
+                    if ready:
+                        data = _os.read(self._pipe_r, 4096).decode(errors="ignore")
+                        for key in data.splitlines():
+                            key = key.strip()
+                            if not key:
+                                continue
+                            app = self._app
+                            if key == "__show__":
+                                app.deiconify()
+                            elif key == "__quit__":
+                                app._on_close()
+                            else:
+                                try:
+                                    idx = int(key)
+                                    servers = list(app.servers)
+                                    if idx < len(servers):
+                                        connected_name = (
+                                            app.client.status.server_name
+                                            if app.client.is_connected() else None
+                                        )
+                                        if connected_name == servers[idx].name:
+                                            app._disconnect()
+                                        else:
+                                            app._connect_by_index(idx)
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+                try:
+                    self._app.after(50, self._poll_pipe)
+                except Exception:
+                    pass
 
             def _make_ns_image(self, r, g, b, size=18):
                 img = AppKit.NSImage.alloc().initWithSize_((size, size))
@@ -299,6 +324,14 @@ def _build_tray_classes():
                             self._status_item)
                     except Exception:
                         pass
+                for fd in (self._pipe_r, self._pipe_w):
+                    try:
+                        if fd is not None:
+                            _os.close(fd)
+                    except Exception:
+                        pass
+                self._pipe_r = None
+                self._pipe_w = None
 
         return TrayIcon, True
 
@@ -501,36 +534,47 @@ class TrustTunnelWindow(tk.Tk):
         servers_tab = tk.Frame(self._notebook, bg=BG)
         self._notebook.add(servers_tab, text="Servers")
 
-        # tree_frame holds the Treeview + transparent overlay frame for buttons
-        tree_frame = tk.Frame(servers_tab, bg=BG)
-        tree_frame.pack(fill="both", expand=True)
+        # Header row (plain tk.Frame + tk.Labels — immune to ttk theme)
+        header = tk.Frame(servers_tab, bg="#3a3a3a", height=28)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        for text, anchor, side, padx in [
+            ("Server",   "w", "left",  (8, 0)),
+            ("Hostname", "w", "left",  (8, 0)),
+            ("Address",  "w", "left",  (8, 0)),
+            ("Username", "w", "right", (0, 8)),
+        ]:
+            tk.Label(header, text=text, bg="#3a3a3a", fg="#d4d4d4",
+                     font=("Helvetica", 10, "bold"), anchor=anchor
+                     ).pack(side=side, padx=padx, fill="y")
 
-        cols = ("name", "hostname", "address", "username")
-        self._tree = ttk.Treeview(tree_frame, columns=cols,
-                                  show="headings", selectmode="browse")
-        self._tree.heading("name",     text="Server",   anchor="w")
-        self._tree.heading("hostname", text="Hostname", anchor="w")
-        self._tree.heading("address",  text="Address",  anchor="w")
-        self._tree.heading("username", text="Username", anchor="w")
-        self._tree.column("name",     width=200, minwidth=100)
-        self._tree.column("hostname", width=160, minwidth=80)
-        self._tree.column("address",  width=170, minwidth=80)
-        self._tree.column("username", width=110, minwidth=50)
-        self._tree.pack(fill="both", expand=True)
+        # Canvas-based server list — no ttk theme interference
+        list_frame = tk.Frame(servers_tab, bg="#2d2d2d")
+        list_frame.pack(fill="both", expand=True)
 
-        # Transparent overlay — a plain tk.Frame placed OVER the tree
-        # using .place(). Buttons are children of this frame, NOT of the
-        # Treeview, so the ttk theme cannot hijack their colors.
-        self._btn_overlay = tk.Frame(tree_frame, bg="#2d2d2d",
+        self._srv_canvas = tk.Canvas(list_frame, bg="#2d2d2d",
                                      highlightthickness=0, bd=0)
-        # Initial placement; updated by _place_row_buttons
+        _csv_sb = ttk.Scrollbar(list_frame, orient="vertical",
+                                command=self._srv_canvas.yview)
+        _csv_sb.pack(side="right", fill="y")
+        self._srv_canvas.configure(yscrollcommand=_csv_sb.set)
+        self._srv_canvas.pack(fill="both", expand=True)
+
+        # Overlay frame for Connect/Disconnect buttons — placed over canvas
+        self._btn_overlay = tk.Frame(list_frame, bg="#2d2d2d",
+                                     highlightthickness=0, bd=0)
         self._btn_overlay.place(x=0, y=0, width=0, height=0)
 
-        self._tree.bind("<<TreeviewSelect>>", self._on_server_select)
-        self._tree.bind("<Configure>",   lambda e: self.after(10, self._reposition_overlay))
-        self._tree.bind("<MouseWheel>",  lambda e: self.after(10, self._place_row_buttons))
-        self._tree.bind("<Button-4>",    lambda e: self.after(10, self._place_row_buttons))
-        self._tree.bind("<Button-5>",    lambda e: self.after(10, self._place_row_buttons))
+        # Track which row is selected
+        self._srv_canvas.bind("<Button-1>", self._on_canvas_click)
+        self._srv_canvas.bind("<Configure>", lambda e: self.after(10, self._refresh_server_list))
+        self._srv_canvas.bind("<MouseWheel>", lambda e: self.after(10, self._place_row_buttons))
+        self._srv_canvas.bind("<Button-4>",   lambda e: self.after(10, self._place_row_buttons))
+        self._srv_canvas.bind("<Button-5>",   lambda e: self.after(10, self._place_row_buttons))
+
+        # Keep a reference so _on_server_select / bypass work
+        self._tree = self._srv_canvas   # alias for legacy callers
+        self._canvas_row_iids = []      # list of server indices in draw order
 
         # ── Tab 2: Bypass ──
         bypass_tab = tk.Frame(self._notebook, bg=BG)
@@ -615,28 +659,22 @@ class TrustTunnelWindow(tk.Tk):
         except Exception:
             self.after(100, self._set_initial_sash)
 
-    # ── Overlay buttons ───────────────────────────────────────────
+    # ── Overlay + canvas row rendering ────────────────────────────
+
+    ROW_H = 32   # pixels per server row
 
     def _reposition_overlay(self):
-        """Resize the overlay frame to cover the tree area, then redraw buttons."""
+        """Resize overlay to cover the canvas area, then redraw buttons."""
         try:
-            x = self._tree.winfo_x()
-            y = self._tree.winfo_y()
-            w = self._tree.winfo_width()
-            h = self._tree.winfo_height()
-            self._btn_overlay.place(x=x, y=y, width=w, height=h)
+            w = self._srv_canvas.winfo_width()
+            h = self._srv_canvas.winfo_height()
+            self._btn_overlay.place(x=0, y=0, width=w, height=h)
         except Exception:
             pass
         self._place_row_buttons()
 
     def _place_row_buttons(self):
-        """
-        Place tk.Button widgets inside _btn_overlay, aligned to each tree row.
-
-        Buttons are children of _btn_overlay (a plain tk.Frame), NOT of the
-        Treeview. This bypasses the ttk theme that would override bg/fg on
-        tk.Button children of ttk widgets on macOS.
-        """
+        """Place Connect/Disconnect buttons aligned to each canvas row."""
         for w in self._row_buttons:
             try:
                 w.destroy()
@@ -650,34 +688,35 @@ class TrustTunnelWindow(tk.Tk):
         state = self.client.status.state
         is_busy = state in (ClientState.CONNECTING, ClientState.CHECKING)
 
-        # The overlay is positioned at (tree.x, tree.y) in the parent frame,
-        # so button coords are relative to the tree origin.
-        name_col_width = self._tree.column("name", option="width")
-        btn_w, btn_h = 94, 22
+        btn_w, btn_h = 100, 22
+        # canvas scroll offset
+        try:
+            scroll_y = self._srv_canvas.canvasy(0)
+        except Exception:
+            scroll_y = 0
 
-        for iid in self._tree.get_children():
-            bbox = self._tree.bbox(iid, "name")
-            if not bbox:
+        for idx, server in enumerate(self.servers):
+            row_y = idx * self.ROW_H - scroll_y
+            # skip rows outside the visible area
+            try:
+                vis_h = self._srv_canvas.winfo_height()
+            except Exception:
+                vis_h = 9999
+            if row_y + self.ROW_H < 0 or row_y > vis_h:
                 continue
-            x, y, col_w, row_h = bbox
 
-            idx = int(iid)
-            if idx >= len(self.servers):
-                continue
-            server = self.servers[idx]
             is_conn = (connected_name == server.name)
             this_busy = is_busy and (connected_name == server.name)
 
             if this_busy:
-                text, bg, fg, abg = "…",          "#444400", "#cca700", "#444400"
+                text, bg, fg, abg = "…",           "#444400", "#cca700", "#444400"
             elif is_conn:
-                text, bg, fg, abg = "Disconnect",  "#6b1212", "#ff8080", "#d63a3a"
+                text, bg, fg, abg = "Disconnect",   "#6b1212", "#ff8080", "#d63a3a"
             else:
-                text, bg, fg, abg = "Connect",     "#003060", "#80c8ff", "#0078d4"
+                text, bg, fg, abg = "Connect",      "#003060", "#80c8ff", "#0078d4"
 
-            # Position at right edge of the name column, vertically centred
-            bx = x + col_w - btn_w - 6
-            by = y + (row_h - btn_h) // 2
+            bx = 6
+            by = int(row_y + (self.ROW_H - btn_h) // 2)
 
             btn = tk.Button(
                 self._btn_overlay,
@@ -693,27 +732,69 @@ class TrustTunnelWindow(tk.Tk):
 
     # ── Server list ───────────────────────────────────────────────
 
+    def _on_canvas_click(self, event):
+        """Select a server row when the canvas is clicked."""
+        try:
+            scroll_y = self._srv_canvas.canvasy(0)
+        except Exception:
+            scroll_y = 0
+        row = int((event.y + scroll_y) // self.ROW_H)
+        if 0 <= row < len(self.servers):
+            self._selected_index = row
+            self._refresh_server_list()   # redraws highlight
+            self._refresh_bypass_list()
+
     def _refresh_server_list(self):
-        for item in self._tree.get_children():
-            self._tree.delete(item)
+        c = self._srv_canvas
+        c.delete("all")
+        self._canvas_row_iids = []
+
         connected_name = (
             self.client.status.server_name if self.client.is_connected() else None
         )
         state = self.client.status.state
+
+        try:
+            cw = c.winfo_width() or 640
+        except Exception:
+            cw = 640
+
+        # Column x positions (left edge of text)
+        col_x = [118, int(cw * 0.38), int(cw * 0.60), int(cw * 0.78)]
+
         for i, s in enumerate(self.servers):
             is_connected = (connected_name == s.name)
             is_busy = (state in (ClientState.CONNECTING, ClientState.CHECKING)
                        and connected_name == s.name)
-            tag = "connected" if is_connected else ("busy" if is_busy else "normal")
-            self._tree.insert("", "end", iid=str(i), values=(
-                s.name,
-                s.endpoint.hostname,
-                ",".join(s.endpoint.addresses) if s.endpoint.addresses else "",
-                s.endpoint.username,
-            ), tags=(tag,))
-        self._tree.tag_configure("normal",    background="#2d2d2d",  foreground="#d4d4d4")
-        self._tree.tag_configure("connected", background="#1a3a2a",  foreground=SUCCESS_GREEN)
-        self._tree.tag_configure("busy",      background="#2a2a1a",  foreground=WARNING_YELLOW)
+            is_selected = (self._selected_index == i)
+
+            # Row background
+            if is_connected:
+                row_bg, text_fg = "#1a3a2a", SUCCESS_GREEN
+            elif is_busy:
+                row_bg, text_fg = "#2a2a1a", WARNING_YELLOW
+            elif is_selected:
+                row_bg, text_fg = "#1e3a5f", "#80c8ff"
+            else:
+                row_bg, text_fg = "#2d2d2d", "#d4d4d4"
+
+            y0 = i * self.ROW_H
+            y1 = y0 + self.ROW_H
+            c.create_rectangle(0, y0, cw, y1, fill=row_bg, outline="", tags="row")
+
+            # Separator line
+            c.create_line(0, y1 - 1, cw, y1 - 1, fill="#3a3a3a", tags="row")
+
+            addr = ",".join(s.endpoint.addresses) if s.endpoint.addresses else ""
+            texts = [s.name, s.endpoint.hostname, addr, s.endpoint.username]
+            for tx, label in zip(col_x, texts):
+                c.create_text(tx, y0 + self.ROW_H // 2, text=label,
+                              fill=text_fg, anchor="w",
+                              font=("Helvetica", 11), tags="row")
+            self._canvas_row_iids.append(i)
+
+        total_h = len(self.servers) * self.ROW_H
+        c.configure(scrollregion=(0, 0, cw, total_h))
         self.after(20, self._reposition_overlay)
 
     def _save_and_refresh(self):
@@ -721,9 +802,9 @@ class TrustTunnelWindow(tk.Tk):
         self._refresh_server_list()
 
     def _on_server_select(self, event=None):
-        sel = self._tree.selection()
-        self._selected_index = int(sel[0]) if sel else None
+        # Legacy stub — selection now handled by _on_canvas_click
         self._refresh_bypass_list()
+
 
     def _toggle_connection(self, idx: int):
         connected_name = (
