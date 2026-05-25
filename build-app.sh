@@ -225,20 +225,16 @@ if [ -d "$APP" ]; then
     SIZE=$(du -sh "$APP" | cut -f1)
     echo "App:  $SCRIPT_DIR/$APP  ($SIZE)"
     echo ""
-    echo "Copy to /Applications?"
-    read -p "  [Y/n]: " answer
-    if [ "${answer:-y}" = "y" ] || [ "${answer:-y}" = "Y" ] || [ -z "$answer" ]; then
-        rm -rf /Applications/TrustTunnel.app
-        cp -R "$APP" /Applications/
-        echo "  → Copied to /Applications/TrustTunnel.app"
+    echo "=== Installing to /Applications ==="
+    rm -rf /Applications/TrustTunnel.app
+    cp -R "$APP" /Applications/
+    echo "  → /Applications/TrustTunnel.app"
 
-        # Auto-configure sudo (always run to ensure correct binary path)
-        echo ""
-        echo "  Configuring passwordless sudo for VPN client..."
-        "$SCRIPT_DIR/setup-sudo.sh"
-    else
-        echo "  To install later: cp -r \"$APP\" /Applications/"
-    fi
+    # Auto-configure sudo (always run to ensure correct binary path)
+    echo ""
+    echo "  Configuring passwordless sudo for VPN client..."
+    "$SCRIPT_DIR/setup-sudo.sh"
+
     echo ""
     echo "To share: zip -r TrustTunnel-macOS.zip \"$APP\""
 else
