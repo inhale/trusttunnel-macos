@@ -1,13 +1,12 @@
 # TrustTunnel macOS GUI — dependencies
 #
 # Runtime deps (must be installed before running or building):
-#   - toml → src/_vendor/toml/ (MIT, pure Python, vendored — no install needed)
+#   - toml    → src/_vendor/toml/ (vendored, no install needed)
 #   - tkinter → bundled with Python
-#   - pystray → system tray icon (macOS: uses AppKit/PyObjC via _darwin backend)
-#   - Pillow → PIL image generation for tray icon (colored circle)
+#   - Pillow  → PIL image generation for tray icon (colored circle)
+#   - PyObjC  → macOS tray icon via NSStatusBar (ships with macOS Python, no install needed)
 #
-# Install: pip install pystray Pillow
+# Install: pip install Pillow
 #
 # Build-time dep: pyinstaller (handled by build-app.sh)
-pystray>=0.19
 Pillow>=9.0

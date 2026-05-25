@@ -116,7 +116,7 @@ echo "=== Installing build dependencies ==="
 # MacPorts Python's bin/ should be on PATH via /opt/local/bin
 # Install pyinstaller via pip
 _install_deps() {
-    if "$PYTHON" -m pip install --quiet pyinstaller pystray Pillow 2>/dev/null; then
+    if "$PYTHON" -m pip install --quiet pyinstaller Pillow 2>/dev/null; then
         return 0
     fi
     # MacPorts Python may need ensurepip
@@ -124,7 +124,7 @@ _install_deps() {
     curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
     "$PYTHON" /tmp/get-pip.py --quiet 2>&1 || true
     rm -f /tmp/get-pip.py
-    if "$PYTHON" -m pip install --quiet pyinstaller pystray Pillow 2>/dev/null; then
+    if "$PYTHON" -m pip install --quiet pyinstaller Pillow 2>/dev/null; then
         return 0
     fi
     # Last resort: find any working pip3

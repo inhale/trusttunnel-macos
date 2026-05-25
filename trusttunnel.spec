@@ -23,11 +23,7 @@ from PyInstaller.utils.hooks import collect_all as _collect_all
 
 tk_datas, tk_binaries, tk_hiddenimports = _collect_all("tkinter")
 
-# Collect pystray and Pillow — needed for tray icon
-try:
-    pystray_datas, pystray_binaries, pystray_hidden = _collect_all("pystray")
-except Exception:
-    pystray_datas, pystray_binaries, pystray_hidden = [], [], []
+# Collect Pillow — needed for tray icon image generation
 try:
     pil_datas, pil_binaries, pil_hidden = _collect_all("PIL")
 except Exception:
@@ -80,11 +76,11 @@ block_cipher = None
 a = Analysis(
     ["run.py"],
     pathex=[],
-    binaries=[] + tk_binaries + pystray_binaries + pil_binaries,
+    binaries=[] + tk_binaries + pil_binaries,
     datas=[
         ("src", "src"),
         ("bin/trusttunnel_client", "bin"),
-    ] + tk_datas + _extra_datas + pystray_datas + pil_datas,
+    ] + tk_datas + _extra_datas + pil_datas,
     hiddenimports=[
         "tkinter",
         "tkinter.ttk",
@@ -101,13 +97,11 @@ a = Analysis(
         "urllib.parse",
         "pathlib",
         "enum",
-        # tray icon
-        "pystray",
-        "pystray._darwin",
+        # tray icon (PyObjC ships with macOS Python — no collect needed)
         "PIL",
         "PIL.Image",
         "PIL.ImageDraw",
-    ] + tk_hiddenimports + pystray_hidden + pil_hidden,
+    ] + tk_hiddenimports + pil_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
