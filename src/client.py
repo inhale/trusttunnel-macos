@@ -205,6 +205,19 @@ class ClientManager:
         try:
             with open(config_path, "w") as f:
                 f.write(toml_content)
+            # Log bound_if so user can see what interface was detected
+            import re as _re
+            m = _re.search(r'bound_if\s*=\s*"([^"]*)"', toml_content)
+            bound_if_val = m.group(1) if m else ""
+            with self._lock:
+                if bound_if_val:
+                    self._status.log_lines.append(
+                        f"[{_ts()}] egress interface: {bound_if_val}"
+                    )
+                else:
+                    self._status.log_lines.append(
+                        f"[{_ts()}] WARNING: could not detect egress interface (bound_if empty)"
+                    )
         except OSError as e:
             self._set_error(f"Failed to write config to {config_path}:\n{e}")
             return False
@@ -262,13 +275,44 @@ class ClientManager:
                 self._set_phase(ConnectPhase.TUNNEL_UP)
                 return True
             else:
-                # Process still running but no tunnel-up signal
-                # Consider it connected anyway if alive
+                # Check if reader already flagged an error
                 with self._lock:
-                    self._status.state = ClientState.CONNECTED
-                self._set_phase(ConnectPhase.TUNNEL_UP)
-                self._notify()
-                return True
+                    current_state = self._status.state
+                if current_state == ClientState.ERROR:
+                    return False
+                # Process still running and no explicit tunnel-up signal yet.
+                # Give it a bit more time — some slow connections take >10s.
+                # But don't blindly declare success; wait up to 20s more.
+                extended_deadline = time.time() + 20
+                while time.time() < extended_deadline:
+                    time.sleep(0.5)
+                    if self._process.poll() is not None:
+                        logs = "\n".join(self._status.log_lines[-20:])
+                        self._set_error(
+                            f"trusttunnel_client exited with code "
+                            f"{self._process.returncode}.\n\n"
+                            f"--- last 20 log lines ---\n{logs}\n"
+                            f"--- end of log ---\n\n"
+                            f"Config: {config_path}\n"
+                            f"Command: sudo -n {binary} -c {config_path}"
+                        )
+                        return False
+                    with self._lock:
+                        s = self._status.state
+                    if s == ClientState.CONNECTED:
+                        self._set_phase(ConnectPhase.TUNNEL_UP)
+                        return True
+                    if s == ClientState.ERROR:
+                        return False
+                # Still alive after 30s total with no tunnel-up — give up
+                logs = "\n".join(self._status.log_lines[-20:])
+                self._set_error(
+                    f"Tunnel did not come up after 30 seconds.\n\n"
+                    f"--- last 20 log lines ---\n{logs}\n"
+                    f"--- end of log ---\n\n"
+                    f"Check the console for errors."
+                )
+                return False
 
         except Exception as e:
             self._set_error(f"Exception during connect:\n{type(e).__name__}: {e}")
@@ -285,11 +329,28 @@ class ClientManager:
                     self._status.log_lines.append(f"[{_ts()}] {line}")
                     if len(self._status.log_lines) > 1000:
                         self._status.log_lines = self._status.log_lines[-400:]
-                # Detect connection established
+                # Detect fatal errors — mark error state immediately
                 lower = line.lower()
                 if any(kw in lower for kw in [
-                    "connected", "tunnel up", "tunnel is up",
-                    "listening", "started", "running",
+                    "failed to initialize tunnel",
+                    "unable to setup routes",
+                    "failed to create listener",
+                    "error at ag::",
+                ]):
+                    with self._lock:
+                        if self._status.state in (
+                            ClientState.CONNECTING, ClientState.CONNECTED
+                        ):
+                            self._status.state = ClientState.ERROR
+                            self._status.phase = ConnectPhase.FAILED
+                            self._status.error = line.strip()
+                    self._notify()
+                    continue
+                # Detect connection established — only on explicit tunnel-up signals
+                # (not generic "started"/"running" which fire before route setup)
+                if any(kw in lower for kw in [
+                    "tunnel up", "tunnel is up",
+                    "vpn_ss_connected",
                 ]):
                     with self._lock:
                         if self._status.state == ClientState.CONNECTING:

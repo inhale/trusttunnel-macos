@@ -163,6 +163,7 @@ class AddEditDialog(tk.Toplevel):
             ("Address (ip:port)", "address", False),
             ("Username", "username", False),
             ("Password", "password", True),
+            ("Bound Interface (optional)", "bound_if", False),
             ("Certificate PEM (optional)", "certificate", False),
         ]
 
@@ -201,6 +202,7 @@ class AddEditDialog(tk.Toplevel):
             self._entries["address"].insert(0, ",".join(ep.addresses))
             self._entries["username"].insert(0, ep.username)
             self._entries["password"].insert(0, ep.password)
+            self._entries["bound_if"].insert(0, self._profile.tun.bound_if)
             if ep.certificate:
                 self._entries["certificate"].insert("1.0", ep.certificate)
 
@@ -220,6 +222,7 @@ class AddEditDialog(tk.Toplevel):
         address = self._entries["address"].get().strip()
         username = self._entries["username"].get().strip()
         password = self._entries["password"].get()
+        bound_if = self._entries["bound_if"].get().strip()
         cert = self._entries["certificate"]
         certificate = cert.get("1.0", "end-1c").strip() if isinstance(cert, tk.Text) else cert.get().strip()
 
@@ -240,6 +243,9 @@ class AddEditDialog(tk.Toplevel):
         if self._profile:
             self._profile.name = name
             self._profile.endpoint = ep
+            self._profile.tun.bound_if = bound_if
+        else:
+            self.result.tun.bound_if = bound_if
         self.destroy()
 
 

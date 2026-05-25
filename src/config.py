@@ -2,11 +2,33 @@
 
 import os
 import re
+import subprocess
 from src._vendor import toml
 import base64
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
+
+
+def _detect_egress_interface() -> str:
+    """Detect the default egress network interface on macOS (e.g. en0, en1, utun3).
+
+    Returns the interface name, or empty string if detection fails.
+    Uses 'route get default' which works on all macOS versions.
+    """
+    try:
+        result = subprocess.run(
+            ["route", "-n", "get", "default"],
+            capture_output=True, text=True, timeout=3,
+        )
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("interface:"):
+                iface = line.split(":", 1)[1].strip()
+                return iface
+    except Exception:
+        pass
+    return ""
 
 
 APP_DIR = os.path.expanduser("~/.trusttunnel-gui")
@@ -91,7 +113,13 @@ class ServerProfile:
             cfg["endpoint"]["certificate"] = self.endpoint.certificate
 
         if self.listener_type == "tun":
-            cfg["listener"] = {"tun": asdict(self.tun)}
+            tun_dict = asdict(self.tun)
+            # Auto-detect egress interface if not set — required for mactun route setup
+            if not tun_dict.get("bound_if"):
+                detected = _detect_egress_interface()
+                if detected:
+                    tun_dict["bound_if"] = detected
+            cfg["listener"] = {"tun": tun_dict}
         else:
             cfg["listener"] = {"socks": asdict(self.socks)}
 
