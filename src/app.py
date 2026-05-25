@@ -41,22 +41,13 @@ def _check_tk_version(parent):
 
 # ── Entry widget factory (handles Tk 8.5 vs 8.6) ──────────────────
 def _make_entry(parent, **kwargs):
-    """Create an Entry that works on both Tk 8.5 (system) and 8.6 (Homebrew).
-
-    On Tk 8.6+: uses ttk.Entry with 'Dark.TEntry' style for dark theme.
-    On Tk 8.5:  falls back to tk.Entry WITHOUT bg/fg (system colors only)
-                because Tk 8.5 ignores bg/fg on Entry on macOS, making
-                it invisible on dark backgrounds.
-    """
+    """Create an Entry that works on both Tk 8.5 (system) and 8.6 (Homebrew)."""
     if _TK_VERSION >= 8.6:
-        # ttk.Entry respects fieldbackground/foreground via styles
         w = ttk.Entry(parent, style="Dark.TEntry", **kwargs)
     else:
-        # tk.Entry on Tk 8.5: strip styling args — use system defaults
         safe_kwargs = {k: v for k, v in kwargs.items()
                        if k not in ('bg', 'fg', 'insertbackground', 'relief',
                                     'borderwidth', 'font')}
-        # Keep font if provided (font works fine on 8.5)
         if 'font' in kwargs:
             safe_kwargs['font'] = kwargs['font']
         w = tk.Entry(parent, **safe_kwargs)
@@ -64,29 +55,21 @@ def _make_entry(parent, **kwargs):
 
 
 # ── Button factory (handles Tk 8.5 vs 8.6) ────────────────────────
-# On Tk 8.5 the 'default' theme ignores custom style backgrounds/foregrounds
-# on buttons — they render invisibly or with zero hit area.
-# Fall back to plain tk.Button with explicit colours on 8.5.
-
 _BUTTON_STYLES = {
     # style_name: (bg, fg, active_bg, font)
     "Accent.TButton":    ("#0078d4", "#ffffff", "#1a8ae8", ("Helvetica", 11, "bold")),
     "Dark.TButton":      ("#3a3a3a", "#ffffff", "#4a4a4a", ("Helvetica", 11)),
     "Red.TButton":       ("#f44747", "#ffffff", "#d63a3a", ("Helvetica", 11, "bold")),
     "SmallDark.TButton": ("#3a3a3a", "#ffffff", "#4a4a4a", ("Helvetica", 9)),
+    "SmallRed.TButton":  ("#f44747", "#ffffff", "#d63a3a", ("Helvetica", 9, "bold")),
+    "SmallAccent.TButton": ("#0078d4", "#ffffff", "#1a8ae8", ("Helvetica", 9, "bold")),
 }
 
 def _make_button(parent, text, command, style="Dark.TButton", **kwargs):
-    """Create a Button that works on both Tk 8.5 and 8.6.
-
-    On Tk 8.6+: uses ttk.Button with the given named style.
-    On Tk 8.5:  uses tk.Button with explicit bg/fg colours because ttk
-                custom styles render invisible/unclickable on macOS Tk 8.5.
-    """
+    """Create a Button that works on both Tk 8.5 and 8.6."""
     if _TK_VERSION >= 8.6:
         return ttk.Button(parent, text=text, command=command,
                           style=style, **kwargs)
-    # Tk 8.5 fallback — plain tk.Button with hardcoded colours
     bg, fg, active_bg, font = _BUTTON_STYLES.get(
         style, ("#3a3a3a", "#ffffff", "#4a4a4a", ("Helvetica", 11))
     )
@@ -100,7 +83,7 @@ def _make_button(parent, text, command, style="Dark.TButton", **kwargs):
 
 def _setup_styles():
     style = ttk.Style()
-    style.theme_use("default")  # 'aqua' has issues with custom colours
+    style.theme_use("default")
 
     style.configure("Dark.TFrame", background="#1e1e1e")
     style.configure("Dark.TLabel", background="#1e1e1e", foreground="#d4d4d4")
@@ -127,8 +110,18 @@ def _setup_styles():
     style.map("SmallDark.TButton",
               background=[("active", "#4a4a4a")])
 
+    style.configure("SmallRed.TButton", background="#f44747", foreground="#ffffff",
+                    font=("Helvetica", 9, "bold"), borderwidth=0)
+    style.map("SmallRed.TButton",
+              background=[("active", "#d63a3a")])
+
+    style.configure("SmallAccent.TButton", background="#0078d4", foreground="#ffffff",
+                    font=("Helvetica", 9, "bold"), borderwidth=0)
+    style.map("SmallAccent.TButton",
+              background=[("active", "#1a8ae8")])
+
     style.configure("Treeview", background="#2d2d2d", foreground="#d4d4d4",
-                    fieldbackground="#2d2d2d", rowheight=26, borderwidth=0)
+                    fieldbackground="#2d2d2d", rowheight=32, borderwidth=0)
     style.configure("Treeview.Heading", background="#3a3a3a", foreground="#d4d4d4",
                     relief="flat", borderwidth=0,
                     font=("Helvetica", 10, "bold"))
@@ -143,25 +136,142 @@ def _setup_styles():
     style.map("TNotebook.Tab",
               background=[("selected", "#1e1e1e")])
 
-    # Dark entry fields
     style.configure("Dark.TEntry", fieldbackground="#1a1a1a",
                     foreground="#e0e0e0", insertcolor="#e0e0e0",
                     borderwidth=0)
     style.map("Dark.TEntry",
               fieldbackground=[("focus", "#1a1a1a")])
 
-    # Dark text widget (simulated via style — actual Text styling is per-widget)
     style.configure("DarkConsole.TFrame", background="#0d0d0d")
 
 # ── colours for tk widgets that don't use ttk ─────────────────────
 BG = "#1e1e1e"
 FG = "#d4d4d4"
-INPUT_BG = "#3a3a3a"   # lighter for contrast
+INPUT_BG = "#3a3a3a"
 CONSOLE_BG = "#0d0d0d"
 ACCENT = "#0078d4"
 ERROR_RED = "#f44747"
 SUCCESS_GREEN = "#4ec9b0"
 WARNING_YELLOW = "#cca700"
+
+
+# ── Tray icon ──────────────────────────────────────────────────────
+def _make_tray_icon(color_hex: str):
+    """Generate a 64x64 circle PIL image for the tray icon."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return None
+    img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    r, g, b = int(color_hex[1:3], 16), int(color_hex[3:5], 16), int(color_hex[5:7], 16)
+    draw.ellipse([4, 4, 60, 60], fill=(r, g, b, 255))
+    return img
+
+
+class TrayManager:
+    """Manages the pystray system tray icon in a background thread."""
+
+    # Tray icon colors matching connection states
+    COLOR_DISCONNECTED = "#666666"
+    COLOR_CONNECTING   = "#cca700"
+    COLOR_CONNECTED    = "#4ec9b0"
+    COLOR_ERROR        = "#f44747"
+
+    def __init__(self, app: "TrustTunnelWindow"):
+        self._app = app
+        self._icon = None
+        self._thread: Optional[threading.Thread] = None
+        self._started = False
+
+    def start(self):
+        """Start the tray icon in a daemon thread."""
+        try:
+            import pystray
+        except ImportError:
+            return  # pystray not available — silent skip
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self):
+        try:
+            import pystray
+            img = _make_tray_icon(self.COLOR_DISCONNECTED)
+            if img is None:
+                return
+            self._icon = pystray.Icon(
+                "TrustTunnel",
+                img,
+                "TrustTunnel VPN",
+                menu=self._build_menu(),
+            )
+            self._started = True
+            self._icon.run()
+        except Exception:
+            pass
+
+    def _build_menu(self):
+        try:
+            import pystray
+        except ImportError:
+            return None
+
+        items = []
+
+        # One item per server
+        for i, server in enumerate(self._app.servers):
+            idx = i  # capture
+            is_connected = (
+                self._app.client.is_connected()
+                and self._app.client.status.server_name == server.name
+            )
+            if is_connected:
+                label = f"✓ {server.name}  [Disconnect]"
+                action = lambda _, j=idx: self._app.after(0, lambda: self._app._disconnect())
+            else:
+                label = f"  {server.name}  [Connect]"
+                action = lambda _, j=idx: self._app.after(
+                    0, lambda: self._app._connect_by_index(j))
+            items.append(pystray.MenuItem(label, action))
+
+        items.append(pystray.Menu.SEPARATOR)
+        items.append(pystray.MenuItem(
+            "Show Window",
+            lambda _: self._app.after(0, self._app.deiconify),
+        ))
+        items.append(pystray.MenuItem(
+            "Quit",
+            lambda _: self._app.after(0, self._app._on_close),
+        ))
+        return pystray.Menu(*items)
+
+    def update(self, state: ClientState):
+        """Update icon color and menu to reflect current connection state."""
+        if not self._started or self._icon is None:
+            return
+        color = {
+            ClientState.DISCONNECTED: self.COLOR_DISCONNECTED,
+            ClientState.CHECKING:     self.COLOR_CONNECTING,
+            ClientState.CONNECTING:   self.COLOR_CONNECTING,
+            ClientState.CONNECTED:    self.COLOR_CONNECTED,
+            ClientState.ERROR:        self.COLOR_ERROR,
+        }.get(state, self.COLOR_DISCONNECTED)
+
+        try:
+            img = _make_tray_icon(color)
+            if img:
+                self._icon.icon = img
+            # Rebuild menu to reflect updated server connect/disconnect states
+            self._icon.menu = self._build_menu()
+        except Exception:
+            pass
+
+    def stop(self):
+        if self._icon:
+            try:
+                self._icon.stop()
+            except Exception:
+                pass
 
 
 class AddEditDialog(tk.Toplevel):
@@ -180,9 +290,6 @@ class AddEditDialog(tk.Toplevel):
         self.resizable(False, False)
         self.minsize(440, 360)
 
-        # grab_set() AFTER widgets are built and window is mapped —
-        # calling it before causes silent grab failure on some Tk versions,
-        # making all fields and buttons unresponsive.
         self.update_idletasks()
         self.deiconify()
         self.lift()
@@ -190,7 +297,6 @@ class AddEditDialog(tk.Toplevel):
         self.grab_set()
 
     def _build(self):
-        # Main form area — lighter background so inputs stand out
         form = tk.Frame(self, bg="#2a2a2a", padx=20, pady=16)
         form.pack(fill="both", expand=True)
 
@@ -243,13 +349,11 @@ class AddEditDialog(tk.Toplevel):
             if ep.certificate:
                 self._entries["certificate"].insert("1.0", ep.certificate)
 
-        # Buttons
         btn_frame = tk.Frame(form, bg="#2a2a2a")
         btn_frame.pack(fill="x", pady=(16, 0))
 
         _make_button(btn_frame, text="Cancel", command=self.destroy,
                      style="Dark.TButton").pack(side="left", padx=(0, 10))
-
         _make_button(btn_frame, text="Save", command=self._save,
                      style="Accent.TButton").pack(side="left")
 
@@ -297,18 +401,22 @@ class TrustTunnelWindow(tk.Tk):
         self.client = ClientManager()
         self.servers: list[ServerProfile] = load_servers()
         self._selected_index: Optional[int] = None
+        self._last_state: Optional[ClientState] = None
 
         self._build()
         self._refresh_server_list()
-        self.geometry("820x600")
-        self.minsize(500, 400)
+        self.geometry("820x620")
+        self.minsize(500, 420)
 
-        # Tk version warning (non-blocking — shown in console, not as popup)
         ok, msg = _check_tk_version(self)
         if not ok:
             self._log("⚠ Tk version too old — widgets may be broken.")
             self._log("   Install Homebrew Python: brew install python@3.11")
             self._log("   Then: /usr/local/bin/python3.11 -m src")
+
+        # Tray icon
+        self._tray = TrayManager(self)
+        self._tray.start()
 
         self._poll_status()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -330,12 +438,22 @@ class TrustTunnelWindow(tk.Tk):
                                      fg="#888", font=("Helvetica", 10))
         self._status_text.pack(side="left", padx=4)
 
-        # ── Notebook: Servers + Bypass tabs ──
-        # PanedWindow wraps notebook + console for resizable split
-        self._main_pane = ttk.PanedWindow(self, orient="vertical")
-        self._main_pane.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+        # ── Main layout: notebook on top, console pinned to bottom ──
+        # Use a plain Frame as the outer container so console stays fixed
+        # and cannot be dragged over the buttons (no PanedWindow for the outer split).
+        outer = tk.Frame(self, bg=BG)
+        outer.pack(fill="both", expand=True, padx=8, pady=(4, 0))
 
-        # Top pane: notebook
+        # Console — packed FIRST with side=bottom so it stays fixed at bottom
+        # and the notebook expands into the remaining space.
+        cons_outer = tk.Frame(outer, bg=BG)
+        cons_outer.pack(side="bottom", fill="x")
+
+        # Draggable sash between notebook and console
+        self._main_pane = ttk.PanedWindow(outer, orient="vertical")
+        self._main_pane.pack(fill="both", expand=True)
+
+        # ── Top pane: notebook ──
         notebook_frame = tk.Frame(self._main_pane, bg=BG)
         self._main_pane.add(notebook_frame, weight=3)
 
@@ -346,55 +464,43 @@ class TrustTunnelWindow(tk.Tk):
         servers_tab = tk.Frame(self._notebook, bg=BG)
         self._notebook.add(servers_tab, text="Servers")
 
-        table_frame = tk.LabelFrame(servers_tab, text=" Servers ", bg=BG, fg="#888",
-                                    font=("Helvetica", 9, "bold"),
-                                    padx=4, pady=4)
+        # Table — no LabelFrame border, just the tree directly
+        table_frame = tk.Frame(servers_tab, bg=BG)
         table_frame.pack(fill="both", expand=True)
 
-        cols = ("name", "hostname", "address", "username", "status")
+        # Columns: name, hostname, address, username, action (connect/disconnect button)
+        cols = ("name", "hostname", "address", "username", "action")
         self._tree = ttk.Treeview(table_frame, columns=cols,
                                   show="headings", selectmode="browse")
-        self._tree.heading("name", text="Name", anchor="w")
+        self._tree.heading("name",     text="Name",     anchor="w")
         self._tree.heading("hostname", text="Hostname", anchor="w")
-        self._tree.heading("address", text="Address", anchor="w")
+        self._tree.heading("address",  text="Address",  anchor="w")
         self._tree.heading("username", text="Username", anchor="w")
-        self._tree.heading("status", text="Status", anchor="w")
-        self._tree.column("name", width=110, minwidth=60)
-        self._tree.column("hostname", width=110, minwidth=60)
-        self._tree.column("address", width=150, minwidth=80)
-        self._tree.column("username", width=90, minwidth=50)
-        self._tree.column("status", width=80, minwidth=60)
-        self._tree.pack(fill="both", expand=True, side="left")
+        self._tree.heading("action",   text="",         anchor="center")
+        self._tree.column("name",     width=120, minwidth=60)
+        self._tree.column("hostname", width=130, minwidth=60)
+        self._tree.column("address",  width=160, minwidth=80)
+        self._tree.column("username", width=100, minwidth=50)
+        self._tree.column("action",   width=100, minwidth=80, stretch=False)
+        # No external scrollbar — mousewheel works natively on macOS
+        self._tree.pack(fill="both", expand=True)
 
-        vsb = ttk.Scrollbar(table_frame, orient="vertical",
-                           command=self._tree.yview)
-        vsb.pack(side="right", fill="y")
-        self._tree.configure(yscrollcommand=vsb.set)
         self._tree.bind("<<TreeviewSelect>>", self._on_server_select)
-        self._tree.bind("<Double-1>", lambda e: self._connect_selected())
+        self._tree.bind("<Double-1>", self._on_tree_double_click)
+        self._tree.bind("<Button-1>",  self._on_tree_click)
 
-        # ── Servers tab button bar (below the tree) ──
+        # ── Servers tab button bar ──
         servers_btn_bar = tk.Frame(servers_tab, bg=BG)
         servers_btn_bar.pack(fill="x", padx=0, pady=(4, 0))
 
-        _make_button(servers_btn_bar, text="+ Add", command=self._add_server,
+        _make_button(servers_btn_bar, text="+ Add",       command=self._add_server,
                      style="Dark.TButton").pack(side="left", padx=1)
-        _make_button(servers_btn_bar, text="Edit", command=self._edit_server,
+        _make_button(servers_btn_bar, text="Edit",        command=self._edit_server,
                      style="Dark.TButton").pack(side="left", padx=1)
-        _make_button(servers_btn_bar, text="Delete", command=self._delete_server,
+        _make_button(servers_btn_bar, text="Delete",      command=self._delete_server,
                      style="Dark.TButton").pack(side="left", padx=1)
         _make_button(servers_btn_bar, text="Import Link", command=self._import_deeplink,
                      style="Dark.TButton").pack(side="left", padx=1)
-
-        self._btn_connect = _make_button(servers_btn_bar, text="Connect",
-                                         command=self._connect_selected,
-                                         style="Accent.TButton")
-        self._btn_connect.pack(side="right", padx=2)
-
-        self._btn_disconnect = _make_button(servers_btn_bar, text="Disconnect",
-                                            command=self._disconnect,
-                                            style="Red.TButton")
-        self._servers_btn_bar = servers_btn_bar
 
         # ── Tab 2: Bypass ──
         bypass_tab = tk.Frame(self._notebook, bg=BG)
@@ -406,7 +512,6 @@ class TrustTunnelWindow(tk.Tk):
                                font=("Helvetica", 9), justify="left", anchor="w")
         bypass_info.pack(fill="x", padx=8, pady=(8, 4))
 
-        # Exclusions list
         exc_list_frame = tk.Frame(bypass_tab, bg=BG)
         exc_list_frame.pack(fill="both", expand=True, padx=8)
 
@@ -415,13 +520,8 @@ class TrustTunnelWindow(tk.Tk):
                                        relief="flat", borderwidth=4,
                                        font=("Menlo", 10), activestyle="none")
         self._bypass_list.pack(fill="both", expand=True, side="left")
+        # No external scrollbar — mousewheel works
 
-        exc_sb = ttk.Scrollbar(exc_list_frame, orient="vertical",
-                              command=self._bypass_list.yview)
-        exc_sb.pack(side="right", fill="y")
-        self._bypass_list.configure(yscrollcommand=exc_sb.set)
-
-        # Add / Delete row
         exc_ctrl = tk.Frame(bypass_tab, bg=BG)
         exc_ctrl.pack(fill="x", padx=8, pady=(4, 8))
 
@@ -429,9 +529,8 @@ class TrustTunnelWindow(tk.Tk):
         self._bypass_entry.pack(side="left", fill="x", expand=True, padx=(0, 6))
         self._bypass_entry.bind("<Return>", lambda e: self._add_exclusion())
 
-        _make_button(exc_ctrl, text="Add", command=self._add_exclusion,
+        _make_button(exc_ctrl, text="Add",    command=self._add_exclusion,
                      style="Accent.TButton").pack(side="left", padx=2)
-
         _make_button(exc_ctrl, text="Delete", command=self._delete_exclusion,
                      style="Dark.TButton").pack(side="left", padx=2)
 
@@ -440,39 +539,44 @@ class TrustTunnelWindow(tk.Tk):
                                        font=("Helvetica", 9), anchor="w")
         self._bypass_status.pack(fill="x", padx=8, pady=(0, 4))
 
-        # Wire tab change to refresh bypass list
         self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-        # ── Console (bottom pane of PanedWindow) ──
+        # ── Console pane (bottom of PanedWindow, has minimum height) ──
         cons_frame = tk.LabelFrame(self._main_pane, text=" Console ", bg=BG, fg="#888",
                                    font=("Helvetica", 9, "bold"),
                                    padx=4, pady=4)
         self._main_pane.add(cons_frame, weight=1)
 
-        self._console = tk.Text(cons_frame, bg=CONSOLE_BG, fg="#a0a0a0",
+        # Enforce minimum pane height so console can't be dragged over buttons
+        self._main_pane.bind("<B1-Motion>",  self._clamp_pane)
+        self._main_pane.bind("<ButtonRelease-1>", self._clamp_pane)
+
+        # Console text + its own scrollbar inside the same frame
+        cons_inner = tk.Frame(cons_frame, bg=CONSOLE_BG)
+        cons_inner.pack(fill="both", expand=True)
+
+        self._console = tk.Text(cons_inner, bg=CONSOLE_BG, fg="#a0a0a0",
                                 font=("Menlo", 10), wrap="word",
                                 state="disabled", relief="flat",
-                                borderwidth=4, insertbackground=FG,
+                                borderwidth=0, insertbackground=FG,
                                 height=7,
                                 selectbackground="#3a5070",
                                 selectforeground="#ffffff")
+
+        csb = ttk.Scrollbar(cons_inner, orient="vertical",
+                            command=self._console.yview)
+        self._console.configure(yscrollcommand=csb.set)
+
+        # Pack scrollbar first (right) then text (fills remaining space)
+        csb.pack(side="right", fill="y")
         self._console.pack(fill="both", expand=True, side="left")
-        # Allow text selection and copy while keeping the widget read-only.
-        # On macOS, state="disabled" blocks even selection — bind the standard
-        # copy shortcuts explicitly so testers can copy error messages.
+
         def _allow_copy(event):
-            # Let Ctrl-C / Cmd-C through; block everything else that would edit
             if event.keysym in ("c", "C") and (event.state & 0x8 or event.state & 0x4):
-                return  # allow copy
+                return
             return "break"
         self._console.bind("<Key>", _allow_copy)
-        # Also ensure clicking/dragging to select works (re-enable cursor)
         self._console.configure(cursor="arrow")
-
-        csb = ttk.Scrollbar(cons_frame, orient="vertical",
-                           command=self._console.yview)
-        csb.pack(side="right", fill="y")
-        self._console.configure(yscrollcommand=csb.set)
 
         btn_row = tk.Frame(cons_frame, bg=CONSOLE_BG)
         btn_row.pack(side="bottom", fill="x", padx=4, pady=2)
@@ -481,20 +585,53 @@ class TrustTunnelWindow(tk.Tk):
         _make_button(btn_row, text="Clear", command=self._clear_console,
                      style="SmallDark.TButton").pack(side="right")
 
+    # ── Pane clamping — prevent console from being dragged over buttons ──
+
+    def _clamp_pane(self, event=None):
+        """Keep console pane at least 80px tall."""
+        try:
+            total = self._main_pane.winfo_height()
+            min_console = 80
+            # PanedWindow sashpos(0) is the y position of the sash
+            sash_y = self._main_pane.sashpos(0)
+            max_sash = total - min_console
+            if sash_y > max_sash:
+                self._main_pane.sashpos(0, max_sash)
+        except Exception:
+            pass
+
     # ── CRUD ──────────────────────────────────────────────────────
 
     def _refresh_server_list(self):
         for item in self._tree.get_children():
             self._tree.delete(item)
+        connected_name = (
+            self.client.status.server_name if self.client.is_connected() else None
+        )
+        state = self.client.status.state
         for i, s in enumerate(self.servers):
-            addr = ",".join(s.endpoint.addresses) if s.endpoint.addresses else ""
-            active = self.client.is_connected() and self.client.status.server_name == s.name
+            is_connected = (connected_name == s.name)
+            is_busy = (state in (ClientState.CONNECTING, ClientState.CHECKING)
+                       and connected_name == s.name)
+            if is_connected:
+                action_label = "Disconnect"
+                tag = "connected"
+            elif is_busy:
+                action_label = "Connecting…"
+                tag = "busy"
+            else:
+                action_label = "Connect"
+                tag = ""
             self._tree.insert("", "end", iid=str(i), values=(
-                s.name, s.endpoint.hostname, addr,
-                s.endpoint.username, "connected" if active else "idle",
-            ), tags=("connected" if active else "",))
+                s.name, s.endpoint.hostname,
+                ",".join(s.endpoint.addresses) if s.endpoint.addresses else "",
+                s.endpoint.username,
+                action_label,
+            ), tags=(tag,))
         self._tree.tag_configure("connected", background="#1a3a2a",
                                  foreground=SUCCESS_GREEN)
+        self._tree.tag_configure("busy", background="#2a2a1a",
+                                 foreground=WARNING_YELLOW)
 
     def _save_and_refresh(self):
         save_servers(self.servers)
@@ -505,13 +642,46 @@ class TrustTunnelWindow(tk.Tk):
         self._selected_index = int(sel[0]) if sel else None
         self._refresh_bypass_list()
 
+    def _on_tree_click(self, event):
+        """Handle clicks on the action column — connect or disconnect."""
+        region = self._tree.identify_region(event.x, event.y)
+        if region != "cell":
+            return
+        col = self._tree.identify_column(event.x)
+        # #5 is the 5th column = "action"
+        if col != "#5":
+            return
+        row_id = self._tree.identify_row(event.y)
+        if not row_id:
+            return
+        idx = int(row_id)
+        self._toggle_connection(idx)
+
+    def _on_tree_double_click(self, event):
+        """Double-click anywhere on a row also toggles connection."""
+        row_id = self._tree.identify_row(event.y)
+        if not row_id:
+            return
+        idx = int(row_id)
+        self._toggle_connection(idx)
+
+    def _toggle_connection(self, idx: int):
+        """Connect if disconnected, disconnect if this server is connected."""
+        connected_name = (
+            self.client.status.server_name if self.client.is_connected() else None
+        )
+        server = self.servers[idx]
+        if connected_name == server.name:
+            self._disconnect()
+        else:
+            self._connect_by_index(idx)
+
     # ── Bypass (exclusions) ──────────────────────────────────────
 
     def _on_tab_changed(self, event=None):
         self._refresh_bypass_list()
 
     def _refresh_bypass_list(self):
-        """Reload exclusions for the selected server."""
         self._bypass_list.delete(0, "end")
         if self._selected_index is None:
             self._bypass_status.configure(
@@ -530,14 +700,12 @@ class TrustTunnelWindow(tk.Tk):
             self._bypass_list.insert("end", f"  {exc}")
 
     def _add_exclusion(self):
-        """Add a new exclusion mask."""
         mask = self._bypass_entry.get().strip()
         if not mask:
             return
         if self._selected_index is None:
             messagebox.showinfo("Note", "Select a server in the Servers tab first.")
             return
-
         profile = self.servers[self._selected_index]
         if mask not in profile.exclusions:
             profile.exclusions.append(mask)
@@ -547,13 +715,9 @@ class TrustTunnelWindow(tk.Tk):
             self._refresh_bypass_list()
 
     def _delete_exclusion(self):
-        """Delete selected exclusion."""
         sel = self._bypass_list.curselection()
-        if not sel:
+        if not sel or self._selected_index is None:
             return
-        if self._selected_index is None:
-            return
-
         profile = self.servers[self._selected_index]
         idx = sel[0]
         if 0 <= idx < len(profile.exclusions):
@@ -633,9 +797,6 @@ class TrustTunnelWindow(tk.Tk):
         _make_button(bf, text="Import", command=do_import,
                      style="Accent.TButton").pack(side="left")
 
-        # Must update + grab AFTER widgets are packed and window is mapped.
-        # Calling grab_set() before the window is visible causes it to fail
-        # silently on some Tk versions — fields become unclickable.
         dlg.update_idletasks()
         dlg.deiconify()
         dlg.lift()
@@ -645,14 +806,18 @@ class TrustTunnelWindow(tk.Tk):
 
     # ── Connection ─────────────────────────────────────────────────
 
-    def _connect_selected(self):
-        if self._selected_index is None:
-            messagebox.showinfo("Note", "Select a server first.")
+    def _connect_by_index(self, idx: int):
+        """Connect to server at idx, disconnecting any active connection first."""
+        if idx >= len(self.servers):
             return
-        profile = self.servers[self._selected_index]
+        profile = self.servers[idx]
         self._log(f"--- Connecting to {profile.name} ---")
+        self._selected_index = idx
 
         def do_connect():
+            # disconnect first if something is active
+            if self.client.is_connected():
+                self.client.disconnect()
             success = self.client.connect(profile)
             self.after(0, lambda: self._log(
                 f"ERROR: {self.client.status.error}" if not success
@@ -660,6 +825,12 @@ class TrustTunnelWindow(tk.Tk):
             self.after(0, self._refresh_server_list)
 
         threading.Thread(target=do_connect, daemon=True).start()
+
+    def _connect_selected(self):
+        if self._selected_index is None:
+            messagebox.showinfo("Note", "Select a server first.")
+            return
+        self._connect_by_index(self._selected_index)
 
     def _disconnect(self):
         self._log("--- Disconnecting ---")
@@ -680,11 +851,10 @@ class TrustTunnelWindow(tk.Tk):
         self._console.configure(state="disabled")
 
     def _copy_console(self):
-        """Copy all console text to the system clipboard."""
         text = self._console.get("1.0", "end-1c")
         self.clipboard_clear()
         self.clipboard_append(text)
-        self.update()  # flush clipboard on macOS
+        self.update()
 
     # ── Polling ────────────────────────────────────────────────────
 
@@ -693,19 +863,21 @@ class TrustTunnelWindow(tk.Tk):
             status = self.client.status
             state = status.state
 
-            dots = {ClientState.DISCONNECTED: ("", "#666", "Disconnected"),
-                    ClientState.CHECKING: ("\u25cf", WARNING_YELLOW, "Checking..."),
-                    ClientState.CONNECTING: ("\u25cf", WARNING_YELLOW,
-                                             f"Connecting [{status.phase.value}]"),
-                    ClientState.CONNECTED: ("\u25cf", SUCCESS_GREEN,
-                                            f"Connected - {status.server_name}"),
-                    ClientState.ERROR: ("\u25cf", ERROR_RED, "Error")}
+            dots = {
+                ClientState.DISCONNECTED: ("",      "#666",          "Disconnected"),
+                ClientState.CHECKING:     ("\u25cf", WARNING_YELLOW,  "Checking..."),
+                ClientState.CONNECTING:   ("\u25cf", WARNING_YELLOW,
+                                           f"Connecting [{status.phase.value}]"),
+                ClientState.CONNECTED:    ("\u25cf", SUCCESS_GREEN,
+                                           f"Connected — {status.server_name}"),
+                ClientState.ERROR:        ("\u25cf", ERROR_RED,       "Error"),
+            }
             dot, color, label = dots.get(state, ("", "#666", state.value))
 
             self._status_dot.configure(text=dot, fg=color)
             self._status_text.configure(text=label, fg=color)
 
-            # Log new lines
+            # Log new lines from client
             lines = status.log_lines
             if not hasattr(self, "_log_idx"):
                 self._log_idx = 0
@@ -713,16 +885,11 @@ class TrustTunnelWindow(tk.Tk):
                 self._log(line)
             self._log_idx = len(lines)
 
-            # Buttons
-            if state == ClientState.CONNECTED:
-                self._btn_connect.pack_forget()
-                self._btn_disconnect.pack(side="right", padx=2)
-            elif state == ClientState.CONNECTING:
-                self._btn_connect.pack_forget()
-                self._btn_disconnect.pack(side="right", padx=2)
-            else:
-                self._btn_disconnect.pack_forget()
-                self._btn_connect.pack(side="right", padx=2)
+            # Refresh server list rows when state changes
+            if state != self._last_state:
+                self._last_state = state
+                self._refresh_server_list()
+                self._tray.update(state)
 
         except Exception:
             pass
@@ -734,6 +901,7 @@ class TrustTunnelWindow(tk.Tk):
                 self.client.disconnect()
             else:
                 return
+        self._tray.stop()
         self.destroy()
 
 

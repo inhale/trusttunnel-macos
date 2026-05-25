@@ -23,6 +23,16 @@ from PyInstaller.utils.hooks import collect_all as _collect_all
 
 tk_datas, tk_binaries, tk_hiddenimports = _collect_all("tkinter")
 
+# Collect pystray and Pillow — needed for tray icon
+try:
+    pystray_datas, pystray_binaries, pystray_hidden = _collect_all("pystray")
+except Exception:
+    pystray_datas, pystray_binaries, pystray_hidden = [], [], []
+try:
+    pil_datas, pil_binaries, pil_hidden = _collect_all("PIL")
+except Exception:
+    pil_datas, pil_binaries, pil_hidden = [], [], []
+
 # Find Tcl/Tk lib dir — search common Homebrew locations (arm64 + x86_64)
 # and whatever Python is actually using right now.
 def _find_tcltk_lib():
@@ -70,11 +80,11 @@ block_cipher = None
 a = Analysis(
     ["run.py"],
     pathex=[],
-    binaries=[] + tk_binaries,
+    binaries=[] + tk_binaries + pystray_binaries + pil_binaries,
     datas=[
-        ("src", "src"),              # all source code (including _vendor/toml)
-        ("bin/trusttunnel_client", "bin"),  # bundled as data → lands in Contents/Resources/bin/
-    ] + tk_datas + _extra_datas,
+        ("src", "src"),
+        ("bin/trusttunnel_client", "bin"),
+    ] + tk_datas + _extra_datas + pystray_datas + pil_datas,
     hiddenimports=[
         "tkinter",
         "tkinter.ttk",
@@ -91,7 +101,13 @@ a = Analysis(
         "urllib.parse",
         "pathlib",
         "enum",
-    ] + tk_hiddenimports,
+        # tray icon
+        "pystray",
+        "pystray._darwin",
+        "PIL",
+        "PIL.Image",
+        "PIL.ImageDraw",
+    ] + tk_hiddenimports + pystray_hidden + pil_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
