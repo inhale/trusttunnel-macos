@@ -373,6 +373,29 @@ class TrustTunnelWindow(tk.Tk):
         self._tree.bind("<<TreeviewSelect>>", self._on_server_select)
         self._tree.bind("<Double-1>", lambda e: self._connect_selected())
 
+        # ── Servers tab button bar (below the tree) ──
+        servers_btn_bar = tk.Frame(servers_tab, bg=BG)
+        servers_btn_bar.pack(fill="x", padx=0, pady=(4, 0))
+
+        _make_button(servers_btn_bar, text="+ Add", command=self._add_server,
+                     style="Dark.TButton").pack(side="left", padx=1)
+        _make_button(servers_btn_bar, text="Edit", command=self._edit_server,
+                     style="Dark.TButton").pack(side="left", padx=1)
+        _make_button(servers_btn_bar, text="Delete", command=self._delete_server,
+                     style="Dark.TButton").pack(side="left", padx=1)
+        _make_button(servers_btn_bar, text="Import Link", command=self._import_deeplink,
+                     style="Dark.TButton").pack(side="left", padx=1)
+
+        self._btn_connect = _make_button(servers_btn_bar, text="Connect",
+                                         command=self._connect_selected,
+                                         style="Accent.TButton")
+        self._btn_connect.pack(side="right", padx=2)
+
+        self._btn_disconnect = _make_button(servers_btn_bar, text="Disconnect",
+                                            command=self._disconnect,
+                                            style="Red.TButton")
+        self._servers_btn_bar = servers_btn_bar
+
         # ── Tab 2: Bypass ──
         bypass_tab = tk.Frame(self._notebook, bg=BG)
         self._notebook.add(bypass_tab, text="Bypass")
@@ -419,28 +442,6 @@ class TrustTunnelWindow(tk.Tk):
 
         # Wire tab change to refresh bypass list
         self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
-
-        # ── Buttons (outside PanedWindow — always visible) ──
-        btn_bar = tk.Frame(self, bg=BG)
-        btn_bar.pack(fill="x", padx=8, pady=(4, 0))
-
-        _make_button(btn_bar, text="+ Add", command=self._add_server,
-                     style="Dark.TButton").pack(side="left", padx=1)
-        _make_button(btn_bar, text="Edit", command=self._edit_server,
-                     style="Dark.TButton").pack(side="left", padx=1)
-        _make_button(btn_bar, text="Delete", command=self._delete_server,
-                     style="Dark.TButton").pack(side="left", padx=1)
-        _make_button(btn_bar, text="Import Link", command=self._import_deeplink,
-                     style="Dark.TButton").pack(side="left", padx=1)
-
-        self._btn_connect = _make_button(btn_bar, text="Connect",
-                                         command=self._connect_selected,
-                                         style="Accent.TButton")
-        self._btn_connect.pack(side="right", padx=2)
-
-        self._btn_disconnect = _make_button(btn_bar, text="Disconnect",
-                                            command=self._disconnect,
-                                            style="Red.TButton")
 
         # ── Console (bottom pane of PanedWindow) ──
         cons_frame = tk.LabelFrame(self._main_pane, text=" Console ", bg=BG, fg="#888",
