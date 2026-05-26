@@ -1,8 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for TrustTunnel macOS app.
+"""PyInstaller spec for TrustTunnel macOS app (PyQt6).
 
 Build:
-    pip install pyinstaller toml
+    pip install pyinstaller toml PyQt6
     pyinstaller trusttunnel.spec
 
 Output: dist/TrustTunnel.app  (double-clickable, no terminal)
@@ -10,18 +10,12 @@ Output: dist/TrustTunnel.app  (double-clickable, no terminal)
 
 import sys
 import os
-import subprocess
 from pathlib import Path
-
-# ── Collect tkinter properly ──────────────────────────────────────────────
-# hiddenimports alone is NOT enough — PyInstaller needs the _tkinter C
-# extension and the Tcl/Tk framework dylibs physically bundled.
-# collect_all("tkinter") handles the pure-Python side; we also need to
-# locate and bundle the Tcl/Tk shared libraries.
 
 from PyInstaller.utils.hooks import collect_all as _collect_all
 
-tk_datas, tk_binaries, tk_hiddenimports = _collect_all("tkinter")
+# Collect PyQt6
+pyqt6_datas, pyqt6_binaries, pyqt6_hiddenimports = _collect_all("PyQt6")
 
 # Collect Pillow — needed for tray icon image generation
 try:
@@ -29,63 +23,21 @@ try:
 except Exception:
     pil_datas, pil_binaries, pil_hidden = [], [], []
 
-# Find Tcl/Tk lib dir — search common Homebrew locations (arm64 + x86_64)
-# and whatever Python is actually using right now.
-def _find_tcltk_lib():
-    # Ask the running Python where its _tkinter came from
-    try:
-        out = subprocess.check_output(
-            [sys.executable, "-c",
-             "import _tkinter; print(_tkinter.__file__)"],
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
-        # Walk up from _tkinter.cpython-*.so to find lib/tcl8.x etc.
-        p = Path(out)
-        for parent in [p.parent, p.parent.parent, p.parent.parent.parent]:
-            for sub in parent.glob("tcl*"):
-                if sub.is_dir():
-                    return str(parent)
-    except Exception:
-        pass
-    # Fallback: common Homebrew paths
-    for candidate in [
-        "/opt/homebrew/opt/python-tk@3.13/lib",
-        "/opt/homebrew/opt/python-tk@3.12/lib",
-        "/opt/homebrew/opt/python-tk@3.11/lib",
-        "/opt/homebrew/opt/tcl-tk/lib",
-        "/usr/local/opt/python-tk@3.13/lib",
-        "/usr/local/opt/python-tk@3.12/lib",
-        "/usr/local/opt/python-tk@3.11/lib",
-        "/usr/local/opt/tcl-tk/lib",
-        "/opt/local/lib",  # MacPorts
-    ]:
-        if Path(candidate).exists():
-            return candidate
-    return None
-
-_tcltk_lib = _find_tcltk_lib()
-_extra_datas = []
-if _tcltk_lib:
-    for name in ["tcl8.5", "tcl8.6", "tcl8.7", "tk8.5", "tk8.6", "tk8.7"]:
-        p = Path(_tcltk_lib) / name
-        if p.exists():
-            _extra_datas.append((str(p), name))
-
 block_cipher = None
 
 a = Analysis(
     ["run.py"],
     pathex=[],
-    binaries=[] + tk_binaries + pil_binaries,
+    binaries=pyqt6_binaries + pil_binaries,
     datas=[
         ("src", "src"),
         ("bin/trusttunnel_client", "bin"),
-    ] + tk_datas + _extra_datas + pil_datas,
+    ] + pyqt6_datas + pil_datas,
     hiddenimports=[
-        "tkinter",
-        "tkinter.ttk",
-        "tkinter.messagebox",
-        "_tkinter",
+        "PyQt6",
+        "PyQt6.QtCore",
+        "PyQt6.QtGui",
+        "PyQt6.QtWidgets",
         "base64",
         "threading",
         "json",
@@ -97,11 +49,10 @@ a = Analysis(
         "urllib.parse",
         "pathlib",
         "enum",
-        # tray icon (PyObjC ships with macOS Python — no collect needed)
         "PIL",
         "PIL.Image",
         "PIL.ImageDraw",
-    ] + tk_hiddenimports + pil_hidden,
+    ] + pyqt6_hiddenimports + pil_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
