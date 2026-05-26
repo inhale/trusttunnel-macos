@@ -315,27 +315,39 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
             echo "  Falling back to arm64 only."
             "$ARM_PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm 2>&1
         else
-            # Build arm64 version
+            # Build arm64 version — force arm64 arch
             echo "  [1/3] Building arm64..."
-            "$ARM_PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm --distpath dist_arm64 2>&1
+            ARCHFLAGS="-arch arm64" "$ARM_PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm --distpath dist_arm64 2>&1
 
-            # Build x86_64 version
+            # Verify arm64 output
+            ARM_OUTPUT="dist_arm64/TrustTunnel.app/Contents/MacOS/TrustTunnel"
+            if [ -f "$ARM_OUTPUT" ]; then
+                ARM_ARCH=$(file "$ARM_OUTPUT" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                echo "        -> $ARM_ARCH"
+            fi
+
+            # Build x86_64 version — force x86_64 arch via Rosetta
             echo "  [2/3] Building x86_64..."
-            arch -x86_64 "$X86_PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm --distpath dist_x86_64 2>&1
+            ARCHFLAGS="-arch x86_64" arch -x86_64 "$X86_PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm --distpath dist_x86_64 2>&1
+
+            # Verify x86_64 output
+            X86_OUTPUT="dist_x86_64/TrustTunnel.app/Contents/MacOS/TrustTunnel"
+            if [ -f "$X86_OUTPUT" ]; then
+                X86_ARCH=$(file "$X86_OUTPUT" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                echo "        -> $X86_ARCH"
+            fi
 
             # Merge with lipo
             echo "  [3/3] Merging with lipo..."
-            if [ -f "dist_x86_64/TrustTunnel.app/Contents/MacOS/TrustTunnel" ]; then
+            if [ -f "$ARM_OUTPUT" ] && [ -f "$X86_OUTPUT" ]; then
                 mkdir -p dist/TrustTunnel.app/Contents/MacOS
-                lipo -create \
-                    dist_arm64/TrustTunnel.app/Contents/MacOS/TrustTunnel \
-                    dist_x86_64/TrustTunnel.app/Contents/MacOS/TrustTunnel \
+                lipo -create "$ARM_OUTPUT" "$X86_OUTPUT" \
                     -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel
                 cp -R dist_arm64/TrustTunnel.app/Contents/Frameworks dist/TrustTunnel.app/Contents/
                 cp -R dist_arm64/TrustTunnel.app/Contents/Resources dist/TrustTunnel.app/Contents/
                 echo "  ✓ Universal2 binary created"
             else
-                echo "  ✗ x86_64 build failed. Using arm64 only."
+                echo "  ✗ One of the builds failed. Using arm64 only."
                 cp -R dist_arm64/TrustTunnel.app dist/TrustTunnel.app
             fi
             rm -rf dist_arm64 dist_x86_64
