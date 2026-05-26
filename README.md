@@ -30,13 +30,25 @@ Dark-themed, with server management, tray icon, and embedded console.
 **Do NOT use PyQt6 >= 6.10** with this app. Starting with PyQt6 6.10, Qt includes a
 `qdarwinpermissionplugin` whose C++ static initializer crashes on macOS when bundled
 with PyInstaller in `console=False` (windowed) mode. The crash occurs before any Python
-code runs (`CFBundleCopyBundleURL` in `QtCore.abi3.so` static init).
+code runs (`CFBundleCopyBundleURL` in `QtCore.abi3.so` static init — SIGSEGV at address 0x8).
 
-If you already have PyQt6 >= 6.10 installed, `build-app.sh` will auto-downgrade to 6.9.1.
-Or manually:
+**The fix — always install the pinned version before building or running:**
 
 ```bash
-pip install 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1'
+pip3 install 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1'
+```
+
+`build-app.sh` will auto-downgrade if needed. For dev runs (`python3 -m src`), install
+manually. The correct version is also pinned in `requirements.txt`.
+
+### Installing deps (one-time)
+
+```bash
+# Required
+pip3 install 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1' Pillow
+
+# Build only
+pip3 install PyInstaller
 ```
 
 ## Install Python
@@ -147,3 +159,40 @@ sudo bash -c 'echo "$(whoami) ALL=(ALL) NOPASSWD: /Applications/TrustTunnel.app/
 ## License
 
 Apache 2.0 — same as TrustTunnel.
+
+## Troubleshooting
+
+### App crashes immediately on launch (segfault / SIGSEGV)
+
+**Symptom**: App crashes before any window appears. Console shows `EXC_BAD_ACCESS`,
+`KERN_INVALID_ADDRESS at 0x0000000000000008`, or mentions `CFBundleCopyBundleURL`
+/ `qdarwinpermissionplugin`.
+
+**Cause**: PyQt6 >= 6.10 is installed. The `qdarwinpermissionplugin` static initializer
+in QtCore crashes when bundled with PyInstaller in windowed mode.
+
+**Fix**:
+```bash
+pip3 install 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1'
+```
+Then rebuild: `./build-app.sh`
+
+### App shows "damaged" or "may be malware" warning
+
+macOS quarantines files downloaded from the internet. Fix:
+```bash
+xattr -cr /Applications/TrustTunnel.app
+```
+
+### App crashes with `NameError: name 'QPushButton' is not defined`
+
+You're running an old build. Pull the latest and rebuild:
+```bash
+git pull && ./build-app.sh
+```
+
+### VPN connection fails with DNS errors
+
+If no DNS servers are configured, the app falls back to `1.1.1.1` and `8.8.8.8`.
+Check the Bypass tab — an empty bypass list with no upstream DNS can cause circular
+dependency errors.

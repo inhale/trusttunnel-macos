@@ -2,10 +2,11 @@
 
 Runtime:
 - Python 3.11+
-- PyQt6 < 6.10 (6.9.1 recommended — 6.10+ crashes on macOS with PyInstaller console=False)
+- PyQt6==6.9.1 (DO NOT use 6.10+ — crashes on macOS with PyInstaller console=False)
+- PyQt6-Qt6==6.9.1
 - Pillow (icon generation)
 
-All handled by build-app.sh automatically.
-
 Build-time:
-- PyInstaller (bundled into .app by build-app.sh)
+- PyInstaller
+
+All handled by build-app.sh automatically.
