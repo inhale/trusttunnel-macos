@@ -56,7 +56,7 @@ a = Analysis(
     ] + pyqt6_hiddenimports + pil_hidden,
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=["rthook_qt.py"],
     excludes=[],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
@@ -76,7 +76,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,           # No terminal window
+    console=True,            # Required on macOS to avoid CFBundle crash in Qt static init
     disable_windowed_traceback=False,
     argv_emulation=True,
     target_arch=None,
