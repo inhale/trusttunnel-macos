@@ -34,6 +34,7 @@ a = Analysis(
         ("bin/trusttunnel_client", "bin"),
         ("generate-icon.py", "."),
         ("icon.icns", "."),
+        ("PkgInfo", "."),
     ] + pyqt6_datas + pil_datas,
     hiddenimports=[
         "PyQt6",
