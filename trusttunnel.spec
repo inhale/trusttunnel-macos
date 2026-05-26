@@ -78,11 +78,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,            # Required: qdarwinpermissionplugin static initializer
-                             # in QtCore.abi3.so calls CFBundleCopyBundleURL during
-                             # dlopen. Without a valid NSBundle (console=False +
-                             # PyInstaller), this segfaults. console=True provides
-                             # the proper bundle context.
+    console=False,           # No terminal window (rthook_qt.py creates Info.plist for bundle context)
     disable_windowed_traceback=False,
     argv_emulation=False,   # Disabled: causes hang when launching from Finder
     target_arch=None,
