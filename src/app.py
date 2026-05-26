@@ -339,7 +339,7 @@ class TrustTunnelWindow:
 
         # Title bar
         title_bar = QHBoxLayout()
-        title_bar.setContentsMargins(8, 4, 8, 4)
+        title_bar.setContentsMargins(20, 20, 20, 20)
 
         # App icon
         app_icon = QIcon()
@@ -369,7 +369,7 @@ class TrustTunnelWindow:
         title_bar.addWidget(icon_label)
 
         title_label = QLabel("TrustTunnel VPN")
-        title_label.setFont(QFont("Helvetica", 18, QFont.Weight.Bold))
+        title_label.setFont(QFont("Helvetica", 22, QFont.Weight.Bold))
         title_bar.addWidget(title_label)
 
         # Spacer before status
