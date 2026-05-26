@@ -254,7 +254,6 @@ class TrustTunnelWindow:
 
         # Build UI
         self._build()
-        self._refresh_server_list()
 
         # Tray icon
         self._tray_icon = QSystemTrayIcon(self._main_window)
@@ -267,6 +266,9 @@ class TrustTunnelWindow:
 
         self._tray_server_actions = []
         self._rebuild_tray_menu()
+
+        # Refresh server list (also rebuilds tray menu entries)
+        self._refresh_server_list()
 
         # Poll timer
         self._poll_timer = QTimer(self._main_window)
