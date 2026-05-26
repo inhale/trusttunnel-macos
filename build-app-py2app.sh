@@ -100,7 +100,7 @@ echo "=== Checking build dependencies ==="
 
 if ! "$PYTHON" -c "import py2app" 2>/dev/null; then
     echo "  -> Installing py2app..."
-    "$PYTHON" -m pip install --quiet py2app 2>&1 || {
+    "$PYTHON" -m pip install --quiet --break-system-packages py2app 2>&1 || {
         echo "  Failed to install py2app"
         exit 1
     }
