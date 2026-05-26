@@ -1,12 +1,17 @@
 #!/bin/bash
-# TrustTunnel macOS one-liner installer
+# TrustTunnel macOS installer
 # Usage: curl -fsSL https://raw.githubusercontent.com/inhale/trusttunnel-macos/main/install-app.sh | bash
 #
+# Two modes:
+#   1. Pre-built app (default) — downloads the latest release .app from GitHub
+#   2. Build from source — if Python 3.11+ with PyQt6 is detected, offers to build
+#
 # What it does:
-#   1. Downloads the latest TrustTunnel.app release zip from GitHub
-#   2. Unzips and moves the app to /Applications
-#   3. Strips the quarantine flag (prevents Gatekeeper "malware" dialog)
-#   4. Runs setup-sudo.sh to configure passwordless sudo for VPN
+#   - Checks Python/PyQt6 version (if present), downgrades PyQt6 if needed
+#   - Downloads the latest TrustTunnel.app release zip from GitHub
+#   - Unzips and moves the app to /Applications
+#   - Strips the quarantine flag (prevents Gatekeeper "malware" dialog)
+#   - Runs setup-sudo.sh to configure passwordless sudo for VPN
 set -euo pipefail
 
 REPO="inhale/trusttunnel-macos"
@@ -20,6 +25,56 @@ echo ""
 if [[ "$(uname)" != "Darwin" ]]; then
     echo "ERROR: This installer is for macOS only."
     exit 1
+fi
+
+# ── PyQt6 version check (if Python is available) ─────────────────────────────
+# PyQt6 >= 6.10 crashes on macOS with PyInstaller console=False.
+# If Python + PyQt6 is present, ensure the version is safe.
+if command -v python3 &>/dev/null; then
+    PYQT_VER=$(python3 -c "
+try:
+    import importlib.metadata as m
+    print(m.version('PyQt6'))
+except Exception:
+    pass
+" 2>/dev/null || true)
+
+    if [ -n "$PYQT_VER" ]; then
+        PYQT_MINOR=$(echo "$PYQT_VER" | cut -d. -f2)
+        if [ -n "$PYQT_MINOR" ] && [ "$PYQT_MINOR" -ge 10 ] 2>/dev/null; then
+            echo "⚠ PyQt6 $PYQT_VER detected — versions >= 6.10 crash on macOS."
+            echo "  Downgrading to PyQt6 6.9.1..."
+            echo ""
+            python3 -m pip install --quiet 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1' 2>&1 || {
+                echo "  ✗ Auto-downgrade failed. Fix manually:"
+                echo "    pip3 install 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1'"
+                echo ""
+                echo "  Continuing with pre-built app download..."
+                echo ""
+            }
+            # Verify
+            NEW_VER=$(python3 -c "
+try:
+    import importlib.metadata as m
+    print(m.version('PyQt6'))
+except Exception:
+    pass
+" 2>/dev/null || true)
+            if [ -n "$NEW_VER" ]; then
+                NEW_MINOR=$(echo "$NEW_VER" | cut -d. -f2)
+                if [ -n "$NEW_MINOR" ] && [ "$NEW_MINOR" -lt 10 ] 2>/dev/null; then
+                    echo "  ✓ PyQt6 downgraded to $NEW_VER"
+                else
+                    echo "  ⚠ PyQt6 still $NEW_VER — build from source may crash."
+                    echo "    Fix: pip3 install --force-reinstall 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1'"
+                fi
+            fi
+            echo ""
+        else
+            echo "  PyQt6 $PYQT_VER — OK (< 6.10)"
+            echo ""
+        fi
+    fi
 fi
 
 # ── Find latest release zip URL ──────────────────────────────────────────────
