@@ -548,33 +548,31 @@ class TrustTunnelWindow(tk.Tk):
                      font=("Helvetica", 10, "bold"), anchor=anchor
                      ).pack(side=side, padx=padx, fill="y")
 
-        # Canvas-based server list — no ttk theme interference
-        list_frame = tk.Frame(servers_tab, bg="#0f0f0f")
+        # Scrollable frame-based server list — tk.Label renders text
+        # correctly on macOS unlike Canvas.create_text which renders
+        # white as grey due to subpixel compositing.
+        list_frame = tk.Frame(servers_tab, bg="#1a1a1a")
         list_frame.pack(fill="both", expand=True)
 
-        self._srv_canvas = tk.Canvas(list_frame, bg="#0f0f0f",
-                                     highlightthickness=0, bd=0)
-        _csv_sb = ttk.Scrollbar(list_frame, orient="vertical",
-                                command=self._srv_canvas.yview)
-        _csv_sb.pack(side="right", fill="y")
-        self._srv_canvas.configure(yscrollcommand=_csv_sb.set)
-        self._srv_canvas.pack(fill="both", expand=True)
+        self._srv_scroll = ttk.Scrollbar(list_frame, orient="vertical")
+        self._srv_scroll.pack(side="right", fill="y")
 
-        # Overlay frame for Connect/Disconnect buttons — placed over canvas
-        self._btn_overlay = tk.Frame(list_frame, bg="#0f0f0f",
-                                     highlightthickness=0, bd=0)
-        self._btn_overlay.place(x=0, y=0, width=0, height=0)
+        self._srv_inner = tk.Frame(list_frame, bg="#1a1a1a")
+        self._srv_inner.pack(fill="both", expand=True)
 
-        # Track which row is selected
-        self._srv_canvas.bind("<Button-1>", self._on_canvas_click)
-        self._srv_canvas.bind("<Configure>", lambda e: self.after(10, self._refresh_server_list))
-        self._srv_canvas.bind("<MouseWheel>", lambda e: self.after(10, self._place_row_buttons))
-        self._srv_canvas.bind("<Button-4>",   lambda e: self.after(10, self._place_row_buttons))
-        self._srv_canvas.bind("<Button-5>",   lambda e: self.after(10, self._place_row_buttons))
+        # Column proportions via grid
+        self._srv_inner.grid_columnconfigure(0, weight=2, minsize=120)
+        self._srv_inner.grid_columnconfigure(1, weight=2, minsize=120)
+        self._srv_inner.grid_columnconfigure(2, weight=2, minsize=120)
+        self._srv_inner.grid_columnconfigure(3, weight=1, minsize=80)
 
-        # Keep a reference so _on_server_select / bypass work
-        self._tree = self._srv_canvas   # alias for legacy callers
-        self._canvas_row_iids = []      # list of server indices in draw order
+        # Row labels stored for refresh
+        self._row_frames: list[tk.Frame] = []
+        self._row_labels: list[list[tk.Label]] = []
+        self._row_buttons: list[tk.Button] = []
+
+        self._tree = self._srv_inner  # alias for legacy callers
+        self._canvas_row_iids: list[int] = []
 
         # ── Tab 2: Bypass ──
         bypass_tab = tk.Frame(self._notebook, bg=BG)
@@ -661,107 +659,27 @@ class TrustTunnelWindow(tk.Tk):
 
     # ── Overlay + canvas row rendering ────────────────────────────
 
-    ROW_H = 32   # pixels per server row
+    ROW_H = 32
 
-    def _reposition_overlay(self):
-        """Resize overlay to cover the canvas area, then redraw buttons."""
-        try:
-            w = self._srv_canvas.winfo_width()
-            h = self._srv_canvas.winfo_height()
-            self._btn_overlay.place(x=0, y=0, width=w, height=h)
-        except Exception:
-            pass
-        self._place_row_buttons()
-
-    def _place_row_buttons(self):
-        """Place Connect/Disconnect buttons aligned to each canvas row."""
-        for w in self._row_buttons:
-            try:
-                w.destroy()
-            except Exception:
-                pass
-        self._row_buttons = []
-
-        connected_name = (
-            self.client.status.server_name if self.client.is_connected() else None
-        )
-        state = self.client.status.state
-        is_busy = state in (ClientState.CONNECTING, ClientState.CHECKING)
-
-        btn_w, btn_h = 100, 22
-        # canvas scroll offset
-        try:
-            scroll_y = self._srv_canvas.canvasy(0)
-        except Exception:
-            scroll_y = 0
-
-        for idx, server in enumerate(self.servers):
-            row_y = idx * self.ROW_H - scroll_y
-            # skip rows outside the visible area
-            try:
-                vis_h = self._srv_canvas.winfo_height()
-            except Exception:
-                vis_h = 9999
-            if row_y + self.ROW_H < 0 or row_y > vis_h:
-                continue
-
-            is_conn = (connected_name == server.name)
-            this_busy = is_busy and (connected_name == server.name)
-
-            if this_busy:
-                text, bg, fg, abg = "…",           "#444400", "#cca700", "#444400"
-            elif is_conn:
-                text, bg, fg, abg = "Disconnect",   "#6b1212", "#ff8080", "#d63a3a"
-            else:
-                text, bg, fg, abg = "Connect",      "#003060", "#80c8ff", "#0078d4"
-
-            bx = 6
-            by = int(row_y + (self.ROW_H - btn_h) // 2)
-
-            btn = tk.Button(
-                self._btn_overlay,
-                text=text,
-                font=("Helvetica", 9, "bold"),
-                bg=bg, fg=fg,
-                activebackground=abg, activeforeground=fg,
-                relief="flat", borderwidth=0, cursor="hand2",
-                command=lambda i=idx: self._toggle_connection(i),
-            )
-            btn.place(x=bx, y=by, width=btn_w, height=btn_h)
-            self._row_buttons.append(btn)
-
-    # ── Server list ───────────────────────────────────────────────
-
-    def _on_canvas_click(self, event):
-        """Select a server row when the canvas is clicked."""
-        try:
-            scroll_y = self._srv_canvas.canvasy(0)
-        except Exception:
-            scroll_y = 0
-        row = int((event.y + scroll_y) // self.ROW_H)
-        if 0 <= row < len(self.servers):
-            self._selected_index = row
-            self._refresh_server_list()   # redraws highlight
-            self._refresh_bypass_list()
+    def _clear_rows(self):
+        """Remove all server row widgets."""
+        for rf in self._row_frames:
+            rf.destroy()
+        self._row_frames.clear()
+        self._row_labels.clear()
+        for btn in self._row_buttons:
+            btn.destroy()
+        self._row_buttons.clear()
+        self._canvas_row_iids.clear()
 
     def _refresh_server_list(self):
-        c = self._srv_canvas
-        c.delete("all")
-        self._canvas_row_iids = []
+        """Rebuild server list rows using tk.Label (renders correctly on macOS)."""
+        self._clear_rows()
 
         connected_name = (
             self.client.status.server_name if self.client.is_connected() else None
         )
         state = self.client.status.state
-
-        try:
-            cw = c.winfo_width() or 640
-        except Exception:
-            cw = 640
-
-        # Column x positions (left edge of text) — col_x[0] pushed right
-        # to avoid overlap with Connect/Disconnect button overlay (x=6..106)
-        col_x = [130, int(cw * 0.38), int(cw * 0.60), int(cw * 0.78)]
 
         for i, s in enumerate(self.servers):
             is_connected = (connected_name == s.name)
@@ -769,7 +687,6 @@ class TrustTunnelWindow(tk.Tk):
                        and connected_name == s.name)
             is_selected = (self._selected_index == i)
 
-            # Row background — dark backgrounds for maximum text contrast
             if is_connected:
                 row_bg, text_fg = "#0d2818", SUCCESS_GREEN
             elif is_busy:
@@ -777,26 +694,66 @@ class TrustTunnelWindow(tk.Tk):
             elif is_selected:
                 row_bg, text_fg = "#0d2848", "#80c8ff"
             else:
-                row_bg, text_fg = "#0f0f0f", "#ffffff"
+                row_bg, text_fg = "#1a1a1a", "#ffffff"
 
-            y0 = i * self.ROW_H
-            y1 = y0 + self.ROW_H
-            c.create_rectangle(0, y0, cw, y1, fill=row_bg, outline="", tags="row")
+            # Row frame
+            row_frame = tk.Frame(self._srv_inner, bg=row_bg, height=self.ROW_H)
+            row_frame.grid(row=i, column=0, columnspan=4, sticky="ew")
+            row_frame.grid_propagate(False)
 
-            # Separator line
-            c.create_line(0, y1 - 1, cw, y1 - 1, fill="#1a1a1a", tags="row")
+            # Click to select
+            row_frame.bind("<Button-1>", lambda e, idx=i: self._on_row_click(idx))
 
             addr = ",".join(s.endpoint.addresses) if s.endpoint.addresses else ""
             texts = [s.name, s.endpoint.hostname, addr, s.endpoint.username]
-            for tx, label in zip(col_x, texts):
-                c.create_text(tx, y0 + self.ROW_H // 2, text=label,
-                              fill=text_fg, anchor="w",
-                              font=("Helvetica", 11, "bold"), tags="row")
+            col_labels = []
+            for col, label_text in enumerate(texts):
+                lbl = tk.Label(
+                    row_frame,
+                    text=label_text,
+                    bg=row_bg,
+                    fg=text_fg,
+                    font=("Helvetica", 11, "bold"),
+                    anchor="w",
+                    padx=8,
+                )
+                lbl.place(relx=col * 0.25, rely=0, relwidth=0.25, relheight=1.0, anchor="nw")
+                lbl.bind("<Button-1>", lambda e, idx=i: self._on_row_click(idx))
+                col_labels.append(lbl)
+
+            # Connect / Disconnect button
+            if is_busy:
+                btn_text, btn_bg, btn_fg = "…", "#444400", "#cca700"
+            elif is_connected:
+                btn_text, btn_bg, btn_fg = "Disconnect", "#6b1212", "#ff8080"
+            else:
+                btn_text, btn_bg, btn_fg = "Connect", "#003060", "#80c8ff"
+
+            btn = tk.Button(
+                row_frame,
+                text=btn_text,
+                font=("Helvetica", 9, "bold"),
+                bg=btn_bg,
+                fg=btn_fg,
+                activebackground=btn_bg,
+                activeforeground=btn_fg,
+                relief="flat",
+                borderwidth=0,
+                cursor="hand2",
+                command=lambda idx=i: self._toggle_connection(idx),
+            )
+            btn.place(relx=1.0, rely=0.5, x=-8, anchor="e")
+            self._row_buttons.append(btn)
+
+            self._row_frames.append(row_frame)
+            self._row_labels.append(col_labels)
             self._canvas_row_iids.append(i)
 
-        total_h = len(self.servers) * self.ROW_H
-        c.configure(scrollregion=(0, 0, cw, total_h))
-        self.after(20, self._reposition_overlay)
+    def _on_row_click(self, idx: int):
+        """Select a server row."""
+        self._selected_index = idx
+        self._refresh_server_list()
+        self._refresh_bypass_list()
 
     def _save_and_refresh(self):
         save_servers(self.servers)
