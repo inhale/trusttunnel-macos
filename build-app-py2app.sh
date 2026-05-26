@@ -100,7 +100,7 @@ echo "=== Checking build dependencies ==="
 
 if ! "$PYTHON" -c "import py2app" 2>/dev/null; then
     echo "  -> Installing py2app..."
-    "$PYTHON" -m pip install --quiet --break-system-packages py2app 2>&1 || {
+    "$PYTHON" -m pip install --quiet --break-system-packages py2app modulegraph 2>&1 || {
         echo "  Failed to install py2app"
         exit 1
     }
@@ -108,7 +108,7 @@ fi
 
 if ! "$PYTHON" -c "import PIL" 2>/dev/null; then
     echo "  -> Installing Pillow..."
-    "$PYTHON" -m pip install --quiet Pillow 2>&1 || true
+    "$PYTHON" -m pip install --quiet --break-system-packages Pillow 2>&1 || true
 fi
 echo "  OK"
 echo ""
@@ -159,14 +159,19 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         echo "  Building universal2 (arm64 + x86_64)..."
 
         echo "  [1/3] Building arm64..."
-        ARCHFLAGS="-arch arm64" "$PYTHON" setup.py py2app --distpath dist_arm64 2>&1
+        rm -rf build dist dist_arm64
+        ARCHFLAGS="-arch arm64" "$PYTHON" setup.py py2app 2>&1
+        [ -d "dist/TrustTunnel.app" ] && mv dist/TrustTunnel.app dist_arm64/TrustTunnel.app
         ARM_APP="dist_arm64/TrustTunnel.app"
         [ -d "$ARM_APP" ] && echo "        -> $(file "$ARM_APP/Contents/MacOS/TrustTunnel" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)"
 
         echo "  [2/3] Building x86_64..."
-        ARCHFLAGS="-arch x86_64" arch -x86_64 "$X86_PYTHON" setup.py py2app --distpath dist_x86_64 2>&1
+        # Ensure x86_64 Python has py2app + modulegraph
+        "$X86_PYTHON" -c "import py2app" 2>/dev/null || "$X86_PYTHON" -m pip install --quiet --break-system-packages py2app modulegraph 2>&1
+        rm -rf build dist dist_x86_64
+        ARCHFLAGS="-arch x86_64" arch -x86_64 "$X86_PYTHON" setup.py py2app 2>&1
+        [ -d "dist/TrustTunnel.app" ] && mv dist/TrustTunnel.app dist_x86_64/TrustTunnel.app
         X86_APP="dist_x86_64/TrustTunnel.app"
-        [ -d "$X86_APP" ] && echo "        -> $(file "$X86_APP/Contents/MacOS/TrustTunnel" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)"
 
         echo "  [3/3] Merging with lipo..."
         if [ -d "$ARM_APP" ] && [ -d "$X86_APP" ]; then
