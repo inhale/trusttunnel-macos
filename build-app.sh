@@ -344,54 +344,62 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                 lipo -create "$ARM_OUTPUT" "$X86_OUTPUT" \
                     -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel
 
-                # Merge Frameworks — need lipo for arch-specific dylibs (Python, Qt, etc.)
-                echo "  Merging Frameworks (lipo per-file)..."
+                # Merge Frameworks — lipo only the key dylibs that differ by arch
+                # Framework bundles (Python.framework, Qt*.framework) must stay intact
+                # for codesign to work. Only merge the specific dylib inside them.
+                echo "  Merging key dylibs (lipo per-dylib)..."
                 rm -rf dist/TrustTunnel.app/Contents/Frameworks
-                mkdir -p dist/TrustTunnel.app/Contents/Frameworks
 
-                ARM_FW="dist_arm64/TrustTunnel.app/Contents/Frameworks"
-                X86_FW="dist_x86_64/TrustTunnel.app/Contents/Frameworks"
-                OUT_FW="dist/TrustTunnel.app/Contents/Frameworks"
+                # Copy entire Frameworks from arm64 first (preserves bundle structure)
+                cp -R "$ARM_FW" "$OUT_FW"
 
-                # Walk arm64 frameworks, merge with x86_64 counterpart where exists
-                find "$ARM_FW" -type f | while read -r arm_file; do
+                # List of key dylibs to lipo-merge (arch-specific)
+                MERGE_LIBS=(
+                    "Python"
+                    "PyQt6/QtCore.abi3.so"
+                    "PyQt6/QtGui.abi3.so"
+                    "PyQt6/QtWidgets.abi3.so"
+                    "python3.11/Python"
+                    "python3.12/Python"
+                )
+
+                for lib in "${MERGE_LIBS[@]}"; do
+                    arm_lib="$ARM_FW/$lib"
+                    x86_lib="$X86_FW/$lib"
+                    out_lib="$OUT_FW/$lib"
+                    if [ -f "$arm_lib" ] && [ -f "$x86_lib" ]; then
+                        arm_arch=$(file "$arm_lib" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                        x86_arch=$(file "$x86_lib" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                        if [ "$arm_arch" != "$x86_arch" ]; then
+                            lipo -create "$arm_lib" "$x86_lib" -output "$out_lib" 2>/dev/null
+                            echo "    $lib: $arm_arch + $x86_arch -> merged"
+                        else
+                            echo "    $lib: both $arm_arch -> skipped"
+                        fi
+                    fi
+                done
+
+                # Also lipo-merge any .so or .dylib files in Frameworks that exist in both
+                echo "  Scanning for additional arch-specific dylibs..."
+                find "$ARM_FW" -name "*.so" -o -name "*.dylib" | while read -r arm_file; do
                     rel="${arm_file#$ARM_FW/}"
                     x86_file="$X86_FW/$rel"
                     out_file="$OUT_FW/$rel"
-                    mkdir -p "$(dirname "$out_file")"
-
-                    if [ -f "$x86_file" ]; then
-                        # Both exist — lipo merge
+                    if [ -f "$x86_file" ] && [ ! -f "$out_file" ]; then
                         arm_arch=$(file "$arm_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
                         x86_arch=$(file "$x86_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
                         if [ "$arm_arch" != "$x86_arch" ]; then
-                            # Different architectures — merge
                             lipo -create "$arm_file" "$x86_file" -output "$out_file" 2>/dev/null
                             echo "    $rel: $arm_arch + $x86_arch -> merged"
-                        else
-                            # Same arch — just copy arm version
-                            cp "$arm_file" "$out_file"
                         fi
-                    else
-                        # Only in arm64 — copy as-is
-                        cp "$arm_file" "$out_file"
                     fi
                 done
 
-                # Also copy any x86-only files
-                find "$X86_FW" -type f | while read -r x86_file; do
-                    rel="${x86_file#$X86_FW/}"
-                    out_file="$OUT_FW/$rel"
-                    if [ ! -f "$out_file" ]; then
-                        mkdir -p "$(dirname "$out_file")"
-                        cp "$x86_file" "$out_file"
-                        echo "    $rel: x86-only -> copied"
-                    fi
-                done
+                echo "  ✓ Frameworks merged (bundle structure preserved)"
 
-                # Copy Resources from arm64
+                # Copy Resources from arm64 (same for both archs)
                 cp -R dist_arm64/TrustTunnel.app/Contents/Resources dist/TrustTunnel.app/Contents/
-                echo "  ✓ Universal2 binary + Frameworks merged"
+
             else
                 echo "  ✗ One of the builds failed. Using arm64 only."
                 cp -R dist_arm64/TrustTunnel.app dist/TrustTunnel.app
