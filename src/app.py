@@ -4,6 +4,8 @@ import os
 import sys
 import threading
 import time
+from typing import Optional
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QColor, QIcon, QAction, QPixmap, QPainter, QPen
 from PyQt6.QtWidgets import (
