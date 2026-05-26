@@ -28,14 +28,18 @@ print(f'{sys.version_info.major}.{sys.version_info.minor}  PyQt6={PYQT_VERSION_S
 }
 
 # Build deduplicated candidate list in priority order
-declare -A _seen_candidates
+# (bash 3.2 compatible — no associative arrays)
 _candidates=""
+_seen=""
 
 _add_candidate() {
     local p="$1"
     [ -z "$p" ] && return
-    [ "${_seen_candidates[$p]+exists}" ] && return
-    _seen_candidates["$p"]=1
+    # check if already seen (space-delimited)
+    case " $_seen " in
+        *" $p "*) return ;;
+    esac
+    _seen="$_seen $p"
     _candidates="$_candidates $p"
 }
 
