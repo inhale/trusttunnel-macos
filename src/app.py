@@ -343,12 +343,25 @@ class TrustTunnelWindow:
 
         # App icon
         app_icon = QIcon()
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "icon.icns")
-        if not os.path.exists(icon_path):
-            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Resources", "icon.icns")
-        if os.path.exists(icon_path):
-            app_icon = QIcon(icon_path)
-        else:
+        # Try multiple paths: bundle Resources, MEIPASS, dev layout
+        icon_candidates = []
+        if getattr(sys, 'frozen', False):
+            meipass = getattr(sys, '_MEIPASS', '')
+            icon_candidates.extend([
+                os.path.join(meipass, 'icon.icns'),
+                os.path.join(meipass, '..', 'Resources', 'icon.icns'),
+                os.path.join(meipass, 'Resources', 'icon.icns'),
+            ])
+        # Dev / source layout
+        icon_candidates.extend([
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'icon.icns'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'icon.icns'),
+        ])
+        for cand in icon_candidates:
+            if os.path.exists(cand):
+                app_icon = QIcon(cand)
+                break
+        if app_icon.isNull():
             # Fallback: generate a small shield icon programmatically
             pm = QPixmap(24, 24)
             pm.fill(QColor(0, 0, 0, 0))
