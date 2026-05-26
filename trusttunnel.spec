@@ -77,11 +77,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,            # Required on macOS to prevent qdarwinpermissionplugin
-                             # static initializer crash (CFBundleCopyBundleURL in
-                             # QtCore.abi3.so dlopen). console=False breaks the
-                             # bundle context that Qt's location permission plugin
-                             # expects during static initialization.
+    console=False,           # No terminal window (permission plugins removed post-build)
     disable_windowed_traceback=False,
     argv_emulation=True,
     target_arch=None,

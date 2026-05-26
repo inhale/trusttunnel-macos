@@ -283,6 +283,16 @@ echo ""
 echo "=== Building .app ==="
 "$PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm 2>&1
 
+# 5.5. Remove permission plugins that cause CFBundleCopyBundleURL crash
+echo ""
+echo "=== Removing macOS permission plugins ==="
+if [ -f "fix-permission-plugins.sh" ]; then
+    chmod +x fix-permission-plugins.sh
+    ./fix-permission-plugins.sh dist/TrustTunnel.app 2>&1
+else
+    echo "  fix-permission-plugins.sh not found, skipping"
+fi
+
 # 6. Ad-hoc codesign
 echo ""
 echo "=== Signing .app (ad-hoc) ==="
