@@ -78,7 +78,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,           # No terminal window (rthook_qt.py creates Info.plist for bundle context)
+    console=True,            # Required: prevents CFBundleCopyBundleURL segfault (LSUIElement hides terminal)
     disable_windowed_traceback=False,
     argv_emulation=False,   # Disabled: causes hang when launching from Finder
     target_arch=None,
@@ -111,5 +111,6 @@ app = BUNDLE(
         "CFBundleDisplayName": "TrustTunnel VPN",
         "LSMinimumSystemVersion": "10.15",
         "NSRequiresAquaSystemAppearance": False,
+        "LSUIElement": True,  # Hide Dock icon/terminal — app runs as UI element (tray only)
     },
 )

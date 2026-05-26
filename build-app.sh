@@ -343,9 +343,55 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                 mkdir -p dist/TrustTunnel.app/Contents/MacOS
                 lipo -create "$ARM_OUTPUT" "$X86_OUTPUT" \
                     -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel
-                cp -R dist_arm64/TrustTunnel.app/Contents/Frameworks dist/TrustTunnel.app/Contents/
+
+                # Merge Frameworks — need lipo for arch-specific dylibs (Python, Qt, etc.)
+                echo "  Merging Frameworks (lipo per-file)..."
+                rm -rf dist/TrustTunnel.app/Contents/Frameworks
+                mkdir -p dist/TrustTunnel.app/Contents/Frameworks
+
+                ARM_FW="dist_arm64/TrustTunnel.app/Contents/Frameworks"
+                X86_FW="dist_x86_64/TrustTunnel.app/Contents/Frameworks"
+                OUT_FW="dist/TrustTunnel.app/Contents/Frameworks"
+
+                # Walk arm64 frameworks, merge with x86_64 counterpart where exists
+                find "$ARM_FW" -type f | while read -r arm_file; do
+                    rel="${arm_file#$ARM_FW/}"
+                    x86_file="$X86_FW/$rel"
+                    out_file="$OUT_FW/$rel"
+                    mkdir -p "$(dirname "$out_file")"
+
+                    if [ -f "$x86_file" ]; then
+                        # Both exist — lipo merge
+                        arm_arch=$(file "$arm_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                        x86_arch=$(file "$x86_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                        if [ "$arm_arch" != "$x86_arch" ]; then
+                            # Different architectures — merge
+                            lipo -create "$arm_file" "$x86_file" -output "$out_file" 2>/dev/null
+                            echo "    $rel: $arm_arch + $x86_arch -> merged"
+                        else
+                            # Same arch — just copy arm version
+                            cp "$arm_file" "$out_file"
+                        fi
+                    else
+                        # Only in arm64 — copy as-is
+                        cp "$arm_file" "$out_file"
+                    fi
+                done
+
+                # Also copy any x86-only files
+                find "$X86_FW" -type f | while read -r x86_file; do
+                    rel="${x86_file#$X86_FW/}"
+                    out_file="$OUT_FW/$rel"
+                    if [ ! -f "$out_file" ]; then
+                        mkdir -p "$(dirname "$out_file")"
+                        cp "$x86_file" "$out_file"
+                        echo "    $rel: x86-only -> copied"
+                    fi
+                done
+
+                # Copy Resources from arm64
                 cp -R dist_arm64/TrustTunnel.app/Contents/Resources dist/TrustTunnel.app/Contents/
-                echo "  ✓ Universal2 binary created"
+                echo "  ✓ Universal2 binary + Frameworks merged"
             else
                 echo "  ✗ One of the builds failed. Using arm64 only."
                 cp -R dist_arm64/TrustTunnel.app dist/TrustTunnel.app
