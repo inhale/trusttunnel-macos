@@ -29,15 +29,15 @@ from .client import ClientManager, ClientState, ClientStatus
 def _dark_palette():
     from PyQt6.QtGui import QPalette, QColor
     p = QPalette()
-    p.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
-    p.setColor(QPalette.ColorRole.WindowText, QColor(212, 212, 212))
-    p.setColor(QPalette.ColorRole.Base, QColor(25, 25, 25))
-    p.setColor(QPalette.ColorRole.AlternateBase, QColor(45, 45, 45))
-    p.setColor(QPalette.ColorRole.ToolTipBase, QColor(40, 40, 40))
-    p.setColor(QPalette.ColorRole.ToolTipText, QColor(212, 212, 212))
-    p.setColor(QPalette.ColorRole.Text, QColor(212, 212, 212))
-    p.setColor(QPalette.ColorRole.Button, QColor(58, 58, 58))
-    p.setColor(QPalette.ColorRole.ButtonText, QColor(212, 212, 212))
+    p.setColor(QPalette.ColorRole.Window, QColor(60, 60, 60))
+    p.setColor(QPalette.ColorRole.WindowText, QColor(220, 220, 220))
+    p.setColor(QPalette.ColorRole.Base, QColor(50, 50, 50))
+    p.setColor(QPalette.ColorRole.AlternateBase, QColor(70, 70, 70))
+    p.setColor(QPalette.ColorRole.ToolTipBase, QColor(55, 55, 55))
+    p.setColor(QPalette.ColorRole.ToolTipText, QColor(220, 220, 220))
+    p.setColor(QPalette.ColorRole.Text, QColor(220, 220, 220))
+    p.setColor(QPalette.ColorRole.Button, QColor(78, 78, 78))
+    p.setColor(QPalette.ColorRole.ButtonText, QColor(220, 220, 220))
     p.setColor(QPalette.ColorRole.BrightText, QColor(255, 128, 128))
     p.setColor(QPalette.ColorRole.Highlight, QColor(0, 120, 212))
     p.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
@@ -246,6 +246,7 @@ class TrustTunnelWindow:
         self._selected_index: Optional[int] = None
         self._last_state = None
         self._log_idx = 0
+        self._conn_buttons: list[QPushButton] = []
         self._quitting = False
 
         # Signal bridge
@@ -303,7 +304,7 @@ class TrustTunnelWindow:
         title_bar = QHBoxLayout()
         title_bar.setContentsMargins(8, 4, 8, 4)
         title_label = QLabel("TrustTunnel VPN")
-        title_label.setFont(QFont("Helvetica", 12, QFont.Weight.Bold))
+        title_label.setFont(QFont("Helvetica", 36, QFont.Weight.Bold))
         title_bar.addWidget(title_label)
         self._status_dot = QLabel("●")
         self._status_dot.setStyleSheet("color: #666; font-size: 13px;")
@@ -331,17 +332,14 @@ class TrustTunnelWindow:
         # Toolbar
         toolbar = QHBoxLayout()
         toolbar.setContentsMargins(8, 4, 8, 4)
-        toolbar.addStretch()
-        self._import_text = QLineEdit()
-        self._import_text.setPlaceholderText("tt://...")
-        self._import_text.setMaximumWidth(260)
-        toolbar.addWidget(self._import_text)
+        add_btn = QPushButton("Add Server")
+        add_btn.clicked.connect(self._add_server)
+        toolbar.addWidget(add_btn)
+        toolbar.addSpacing(8)
         import_btn = QPushButton("Import")
         import_btn.clicked.connect(self._import_deeplink)
         toolbar.addWidget(import_btn)
-        add_btn = QPushButton("+ Add Server")
-        add_btn.clicked.connect(self._add_server)
-        toolbar.addWidget(add_btn)
+        toolbar.addStretch()
         servers_layout.addLayout(toolbar)
 
         # Server table
@@ -410,7 +408,7 @@ class TrustTunnelWindow:
         self._console.setFont(QFont("Menlo", 10))
         console_layout.addWidget(self._console)
         splitter.addWidget(console_widget)
-        splitter.setSizes([400, 140])
+        splitter.setSizes([320, 320])
 
     # ── Server list ──────────────────────────────────────────────────────
 
@@ -424,6 +422,7 @@ class TrustTunnelWindow:
         )
         state = self.client.status.state
 
+        self._conn_buttons.clear()
         for i, s in enumerate(self.servers):
             self._table.insertRow(i)
 
@@ -445,20 +444,33 @@ class TrustTunnelWindow:
             self._table.setItem(i, 0, name_item)
 
             if is_busy:
-                btn_text, btn_color, btn_fg = "…", "#2a2a00", "#cca700"
+                btn_text = "…"
             elif is_connected:
-                btn_text, btn_color, btn_fg = "Disconnect", "#4a0a0a", "#ff8080"
+                btn_text = "Disconnect"
             else:
-                btn_text, btn_color, btn_fg = "Connect", "#002040", "#80c8ff"
+                btn_text = "Connect"
 
             conn_btn = QPushButton(btn_text)
+            conn_btn.setCheckable(True)
+            conn_btn.setChecked(is_connected)
             conn_btn.setStyleSheet(
-                f"background: {btn_color}; color: {btn_fg}; "
-                f"border: none; border-radius: 3px; padding: 3px 8px; "
-                f"font-weight: bold; font-size: 9pt;"
+                "QPushButton {"
+                "  border: none; border-radius: 3px; padding: 3px 8px;"
+                "  font-weight: bold; font-size: 9pt;"
+                "}"
+                "QPushButton:!checked {"
+                "  background: #666; color: #ccc;"
+                "}"
+                "QPushButton:checked {"
+                "  background: #1a6b1a; color: #7dff7d;"
+                "}"
+                "QPushButton:!checked:hover {"
+                "  background: #777; color: #eee;"
+                "}"
             )
             conn_btn.clicked.connect(lambda checked, idx=i: self._toggle_connection(idx))
             self._table.setCellWidget(i, 1, conn_btn)
+            self._conn_buttons.append(conn_btn)
 
             host_item = QTableWidgetItem(s.endpoint.hostname)
             host_item.setForeground(text_fg)
@@ -482,18 +494,60 @@ class TrustTunnelWindow:
             actions_layout.setContentsMargins(2, 0, 2, 0)
             actions_layout.setSpacing(2)
 
-            edit_btn = QPushButton("✎")
-            edit_btn.setFixedSize(28, 24)
+            from PyQt6.QtGui import QPainter, QPen, QColor, QIcon, QPixmap
+
+            def _make_icon(draw_fn, size=20):
+                pm = QPixmap(size, size)
+                pm.fill(QColor(0, 0, 0, 0))
+                painter = QPainter(pm)
+                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+                draw_fn(painter, size)
+                painter.end()
+                return QIcon(pm)
+
+            def _draw_pencil(painter, size):
+                m = max(3, size // 5)
+                pen = QPen(QColor("#aaa"), max(1, size // 10))
+                painter.setPen(pen)
+                # pencil body (diagonal)
+                painter.drawLine(m, size - m, size - m, m)
+                # tip
+                painter.drawLine(size - m, m, size - m + 2, m - 2)
+                # eraser end
+                painter.drawLine(m, size - m, m - 2, size - m + 2)
+
+            def _draw_trash(painter, size):
+                m = max(3, size // 5)
+                pen = QPen(QColor("#c44"), max(1, size // 10))
+                painter.setPen(pen)
+                # bin body
+                painter.drawRect(m, m + 2, size - 2*m, size - 2*m - 2)
+                # lid
+                painter.drawLine(m - 1, m + 2, size - m + 1, m + 2)
+                # handle
+                painter.drawLine(size//2 - 2, m - 1, size//2 + 2, m - 1)
+                painter.drawLine(size//2, m - 1, size//2, m + 2)
+                # lines inside
+                x1 = m + (size - 2*m) // 3
+                x2 = m + 2*(size - 2*m) // 3
+                painter.drawLine(x1, m + 5, x1, size - m - 3)
+                painter.drawLine(x2, m + 5, x2, size - m - 3)
+
+            pencil_icon = _make_icon(_draw_pencil)
+            trash_icon = _make_icon(_draw_trash)
+
+            edit_btn = QPushButton(pencil_icon, "")
+            edit_btn.setFixedSize(30, 28)
             edit_btn.setStyleSheet(
-                "background: transparent; color: #888; border: none; font-size: 14px;"
+                "background: transparent; border: none; padding: 2px;"
             )
             edit_btn.clicked.connect(lambda checked, idx=i: self._edit_server_by_index(idx))
             actions_layout.addWidget(edit_btn)
 
-            del_btn = QPushButton("✕")
-            del_btn.setFixedSize(28, 24)
+            del_btn = QPushButton(trash_icon, "")
+            del_btn.setFixedSize(30, 28)
             del_btn.setStyleSheet(
-                "background: transparent; color: #888; border: none; font-size: 14px;"
+                "background: transparent; border: none; padding: 2px;"
             )
             del_btn.clicked.connect(lambda checked, idx=i: self._delete_server_by_index(idx))
             actions_layout.addWidget(del_btn)
@@ -696,25 +750,38 @@ class TrustTunnelWindow:
 
         pm = QPixmap(16, 16)
         pm.fill(Qt.GlobalColor.transparent)
-        p = QPainter(pm)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
+        cx, cy = 8, 8
+
+        # Status color for the accretion ring
         if state == ClientState.CONNECTED:
-            color = QColor(78, 201, 176)
+            ring_color = QColor(78, 201, 176)    # green
         elif state in (ClientState.CONNECTING, ClientState.CHECKING):
-            color = QColor(204, 167, 0)
+            ring_color = QColor(204, 167, 0)      # yellow
         elif state == ClientState.ERROR:
-            color = QColor(244, 71, 71)
+            ring_color = QColor(244, 71, 71)      # red
         else:
-            color = QColor(102, 102, 102)
+            ring_color = QColor(100, 100, 100)    # grey
 
-        p.setPen(QPen(color, 1))
-        p.setBrush(color)
-        p.drawRoundedRect(2, 1, 12, 14, 2, 2)
-        p.setPen(QPen(QColor(30, 30, 30), 1))
-        p.setBrush(QColor(30, 30, 30))
-        p.drawEllipse(5, 5, 6, 6)
-        p.end()
+        # Outer glow ring (thin)
+        glow = QColor(ring_color)
+        glow.setAlpha(80)
+        painter.setPen(QPen(glow, 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(cx - 6, cy - 6, 12, 12)
+
+        # Accretion ring (elliptical, tilted)
+        painter.setPen(QPen(ring_color, 1))
+        painter.drawEllipse(cx - 4, cy - 3, 8, 6)
+
+        # Event horizon (black center)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0))
+        painter.drawEllipse(cx - 2, cy - 2, 4, 4)
+
+        painter.end()
 
         icon = QIcon(pm)
         self._tray_icon.setIcon(icon)

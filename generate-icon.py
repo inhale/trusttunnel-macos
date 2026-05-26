@@ -1,59 +1,91 @@
 #!/usr/bin/env python3
-"""Generate a proper TrustTunnel app icon as .icns file using Pillow + iconutil."""
+"""Generate a black-hole themed TrustTunnel app icon as .icns file using Pillow + iconutil."""
 import os
 import sys
 import subprocess
 import tempfile
 import shutil
+import math
+
 
 def create_icon(size, output_path):
-    """Create a shield+VPN icon PNG at the given size."""
+    """Create a black hole icon PNG at the given size."""
     from PIL import Image, ImageDraw
 
     img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    margin = max(1, size // 16)
-    bg_color = (45, 45, 45, 255)
-
-    # Background rounded rect
-    draw.rounded_rectangle(
-        [margin, margin, size - margin, size - margin],
-        radius=max(size // 8, 2),
-        fill=bg_color
-    )
-
-    # Shield shape
     cx, cy = size // 2, size // 2
-    shield_w = int(size * 0.55)
-    shield_h = int(size * 0.65)
-    shield_x1 = cx - shield_w // 2
-    shield_y1 = cy - shield_h // 2
-    shield_x2 = cx + shield_w // 2
-    shield_y2 = cy + shield_h // 2
-    shield_color = (37, 99, 235, 255)
-    draw.rounded_rectangle(
-        [shield_x1, shield_y1, shield_x2, shield_y2],
-        radius=max(size // 10, 2),
-        fill=shield_color
-    )
 
-    # Tunnel line — white horizontal
-    line_width = max(1, size // 32)
-    line_y = cy - shield_h // 6
-    line_x1 = cx - shield_w // 3
-    line_x2 = cx + shield_w // 3
-    draw.line([(line_x1, line_y), (line_x2, line_y)], fill=(255, 255, 255, 255), width=line_width)
+    # ── Outer glow (accretion disk halo) ──
+    for r in range(int(size * 0.48), int(size * 0.35), -1):
+        t = (r - size * 0.35) / (size * 0.48 - size * 0.35)
+        alpha = int(40 + 60 * (1 - t))
+        color = (
+            int(80 + 120 * t),
+            int(40 + 60 * t),
+            int(180 + 75 * t),
+            alpha,
+        )
+        draw.ellipse(
+            [cx - r, cy - r, cx + r, cy + r],
+            fill=color,
+        )
 
-    # Connection dot — green
-    dot_r = max(2, size // 20)
-    dot_y = cy + shield_h // 5
+    # ── Accretion disk ring (bright, tilted ellipse to suggest rotation) ──
+    ring_r = int(size * 0.38)
+    ring_w = max(2, size // 12)
+    for offset in range(ring_w):
+        t = offset / ring_w
+        alpha = int(180 + 75 * math.sin(t * math.pi))
+        # Tilted: slightly elliptical
+        rx = ring_r + offset
+        ry = int(ring_r * 0.6) + offset
+        r = int(ring_r * 0.3 + offset)
+        color = (
+            int(120 + 135 * t),
+            int(80 + 100 * t),
+            int(200 + 55 * (1 - t)),
+            alpha,
+        )
+        draw.ellipse(
+            [cx - rx, cy - ry, cx + rx, cy + ry],
+            outline=color,
+            width=1,
+        )
+
+    # ── Event horizon (solid black center) ──
+    hole_r = int(size * 0.22)
     draw.ellipse(
-        [cx - dot_r, dot_y - dot_r, cx + dot_r, dot_y + dot_r],
-        fill=(78, 201, 176, 255)
+        [cx - hole_r, cy - hole_r, cx + hole_r, cy + hole_r],
+        fill=(0, 0, 0, 255),
     )
+
+    # ── Inner glow ring (just outside event horizon) ──
+    for r in range(hole_r + 3, hole_r - 1, -1):
+        if r <= hole_r:
+            break
+        t = (r - hole_r) / 3
+        alpha = int(120 * (1 - t))
+        color = (60, 30, 140, alpha)
+        draw.ellipse(
+            [cx - r, cy - r, cx + r, cy + r],
+            outline=color,
+            width=1,
+        )
+
+    # ── Gravitational lensing arcs (light bending around the hole) ──
+    arc_r = int(size * 0.28)
+    for angle_offset in [30, -30, 60, -60]:
+        start_a = angle_offset - 20
+        end_a = angle_offset + 20
+        alpha = 50 + abs(angle_offset) // 3
+        color = (100, 60, 200, alpha)
+        bbox = [cx - arc_r, cy - arc_r, cx + arc_r, cy + arc_r]
+        draw.arc(bbox, start_a, end_a, fill=color, width=max(1, size // 40))
 
     img.save(output_path)
+
 
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else 'icon.icns'
@@ -61,8 +93,6 @@ def main():
     tmpdir = tempfile.mkdtemp()
     try:
         # Generate all required sizes
-        # iconutil needs: 16x16, 32x32, 128x128, 256x256, 512x512
-        # Plus @2x versions: icon_16x16@2x = 32x32, etc.
         sizes = [16, 32, 64, 128, 256, 512]
         for s in sizes:
             create_icon(s, os.path.join(tmpdir, f'{s}x{s}.png'))
@@ -76,7 +106,7 @@ def main():
             src = os.path.join(tmpdir, f'{s}x{s}.png')
             shutil.copy2(src, os.path.join(iconset, f'icon_{s}x{s}.png'))
 
-        # @2x sizes (16@2x=32, 32@2x=64, 128@2x=256, 256@2x=512)
+        # @2x sizes
         retinas = [(16, 32), (32, 64), (128, 256), (256, 512)]
         for small, large in retinas:
             src = os.path.join(tmpdir, f'{large}x{large}.png')
@@ -88,6 +118,7 @@ def main():
 
     finally:
         shutil.rmtree(tmpdir)
+
 
 if __name__ == '__main__':
     main()
