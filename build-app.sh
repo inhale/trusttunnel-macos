@@ -143,11 +143,37 @@ if [ "$FOUND" -eq 0 ]; then
     echo "║                                                              ║"
     echo "║  Install steps:                                              ║"
     echo "║                                                              ║"
-    echo "║  1. Install Homebrew Python:                                 ║"
-    echo "║     brew install python@3.12                                 ║"
-    echo "║                                                              ║"
-    echo "║  2. Install PyQt6 + PyInstaller:                             ║"
-    echo "║     pip3 install PyQt6 PyInstaller                           ║"
+
+    # Find any Python 3.11+ to suggest, even without PyQt6
+    _suggest_py=""
+    for _p in /usr/local/bin/python3.13 /usr/local/bin/python3.12 /usr/local/bin/python3.11 /usr/local/bin/python3 /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11 /opt/homebrew/bin/python3; do
+        if [ -x "$_p" ]; then
+            _v=$("$_p" -c "import sys; print('%d.%d' % (sys.version_info.major, sys.version_info.minor))" 2>/dev/null)
+            if [ -n "$_v" ]; then
+                _major=$(echo "$_v" | cut -d. -f1)
+                _minor=$(echo "$_v" | cut -d. -f2)
+                if [ "$_major" -ge 3 ] && [ "$_minor" -ge 11 ] 2>/dev/null; then
+                    _suggest_py="$_p"
+                    break
+                fi
+            fi
+        fi
+    done
+
+    if [ -n "$_suggest_py" ]; then
+        echo "║  You have Python 3.11+ at:                                   ║"
+        echo "║    $_suggest_py"
+        echo "║                                                              ║"
+        echo "║  Install PyQt6 + PyInstaller:                                ║"
+        printf "║    %-58s║\n" "$_suggest_py -m pip install PyQt6 PyInstaller"
+    else
+        echo "║  1. Install Homebrew Python:                                 ║"
+        echo "║     brew install python@3.12                                 ║"
+        echo "║                                                              ║"
+        echo "║  2. Install PyQt6 + PyInstaller:                             ║"
+        echo "║     pip3 install PyQt6 PyInstaller                           ║"
+    fi
+
     echo "║                                                              ║"
     echo "║  3. Re-run: ./build-app.sh                                   ║"
     echo "║                                                              ║"
