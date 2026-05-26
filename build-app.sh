@@ -453,6 +453,14 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
             echo "  [DEBUG] x86_64 Resources/ top-level:"
             ls dist_x86_64/TrustTunnel.app/Contents/Resources/ 2>/dev/null | head -20
 
+            # Save Info.plist from each build for inspection
+            echo "  [DEBUG] arm64 Info.plist LSUIElement:"
+            grep -a "LSUIElement" dist_arm64/TrustTunnel.app/Contents/Info.plist 2>/dev/null || echo "    NOT FOUND"
+            echo "  [DEBUG] x86_64 Info.plist LSUIElement:"
+            grep -a "LSUIElement" dist_x86_64/TrustTunnel.app/Contents/Info.plist 2>/dev/null || echo "    NOT FOUND"
+            echo "  [DEBUG] merged Info.plist LSUIElement:"
+            grep -a "LSUIElement" dist/TrustTunnel.app/Contents/Info.plist 2>/dev/null || echo "    NOT FOUND"
+
             # Don't clean up — leave dirs for inspection
             # rm -rf dist_arm64 dist_x86_64
         fi
