@@ -4,19 +4,7 @@ import os
 import sys
 import threading
 import time
-from typing import Optional
-
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QSize
-from PyQt6.QtGui import QFont, QColor, QIcon, QAction, QPixmap, QPainter, QPen
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
-    QLabel, QLineEdit, QTextEdit, QDialog, QFormLayout,
-    QTabWidget, QSplitter, QMessageBox, QAbstractItemView,
-    QFrame, QSizePolicy, QSpacerItem, QMenuBar, QMenu,
-    QStatusBar, QToolBar, QComboBox, QCheckBox, QSpinBox,
-    QSystemTrayIcon,
-)
+from typing import Optional, TYPE_CHECKING
 
 from .config import (
     ServerProfile, EndpointConfig,
@@ -24,10 +12,23 @@ from .config import (
 )
 from .client import ClientManager, ClientState, ClientStatus
 
+if TYPE_CHECKING:
+    from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+    from PyQt6.QtGui import QFont, QColor, QIcon, QAction, QPixmap, QPainter, QPen
+    from PyQt6.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+        QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
+        QLabel, QLineEdit, QTextEdit, QDialog, QFormLayout,
+        QTabWidget, QSplitter, QMessageBox, QAbstractItemView,
+        QFrame, QSizePolicy, QSpacerItem, QMenuBar, QMenu,
+        QStatusBar, QToolBar, QComboBox, QCheckBox, QSpinBox,
+        QSystemTrayIcon,
+    )
+
 
 # ── Dark palette ──────────────────────────────────────────────────────────
 def _dark_palette():
-    from PyQt6.QtGui import QPalette
+    from PyQt6.QtGui import QPalette, QColor
     p = QPalette()
     p.setColor(QPalette.ColorRole.Window, QColor(30, 30, 30))
     p.setColor(QPalette.ColorRole.WindowText, QColor(212, 212, 212))
@@ -45,23 +46,44 @@ def _dark_palette():
 
 
 # ── Signal bridge for thread-safe UI updates ──────────────────────────────
-class _SignalBridge(QObject):
-    status_changed = pyqtSignal(object)  # ClientState
-    log_line = pyqtSignal(str)
+class _SignalBridge:
+    """Deferred — actual QObject created lazily."""
+    def __init__(self):
+        self._obj = None
+
+    def _ensure(self):
+        if self._obj is None:
+            from PyQt6.QtCore import QObject, pyqtSignal
+            class _Bridge(QObject):
+                status_changed = pyqtSignal(object)  # ClientState
+                log_line = pyqtSignal(str)
+            self._obj = _Bridge()
+        return self._obj
+
+    @property
+    def status_changed(self):
+        return self._ensure().status_changed
+
+    @property
+    def log_line(self):
+        return self._ensure().log_line
 
 
 # ── Add/Edit Server Dialog ────────────────────────────────────────────────
-class AddEditDialog(QDialog):
+class AddEditDialog:
     def __init__(self, parent, profile: Optional[ServerProfile] = None):
-        super().__init__(parent)
-        self.setWindowTitle("Edit Server" if profile else "Add Server")
-        self.setMinimumWidth(440)
+        from PyQt6.QtWidgets import QDialog, QFormLayout, QHBoxLayout, QLineEdit, QTextEdit, QPushButton, QMessageBox
+        from PyQt6.QtCore import Qt
         self._profile = profile
-        self.result: Optional[ServerProfile] = None
+        self._result: Optional[ServerProfile] = None
+        self._dlg = QDialog(parent)
+        self._dlg.setWindowTitle("Edit Server" if profile else "Add Server")
+        self._dlg.setMinimumWidth(440)
         self._build()
 
     def _build(self):
-        layout = QFormLayout(self)
+        from PyQt6.QtWidgets import QFormLayout, QHBoxLayout, QLineEdit, QTextEdit, QPushButton, QMessageBox
+        layout = QFormLayout(self._dlg)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(8)
 
@@ -81,7 +103,6 @@ class AddEditDialog(QDialog):
             self._entries[key] = edit
             layout.addRow(label + ":", edit)
 
-        # Certificate (multi-line)
         cert_edit = QTextEdit()
         cert_edit.setPlaceholderText("Paste PEM certificate here (optional)")
         cert_edit.setMaximumHeight(80)
@@ -99,11 +120,10 @@ class AddEditDialog(QDialog):
             if ep.certificate:
                 cert_edit.setPlainText(ep.certificate)
 
-        # Buttons
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
+        cancel_btn.clicked.connect(self._dlg.reject)
         save_btn = QPushButton("Save")
         save_btn.setDefault(True)
         save_btn.clicked.connect(self._save)
@@ -112,6 +132,8 @@ class AddEditDialog(QDialog):
         layout.addRow(btn_row)
 
     def _save(self):
+        from PyQt6.QtWidgets import QMessageBox
+        from .config import EndpointConfig, ServerProfile
         name = self._entries["name"].text().strip()
         hostname = self._entries["hostname"].text().strip()
         address = self._entries["address"].text().strip()
@@ -121,7 +143,7 @@ class AddEditDialog(QDialog):
         certificate = self._entries["certificate"].toPlainText().strip()
 
         if not name or not hostname or not address or not username:
-            QMessageBox.warning(self, "Missing Fields",
+            QMessageBox.warning(self._dlg, "Missing Fields",
                                 "Name, Hostname, Address, Username are required.")
             return
 
@@ -135,20 +157,33 @@ class AddEditDialog(QDialog):
         )
         self.result = ServerProfile(name=name, endpoint=ep)
         self.result.tun.bound_if = bound_if
-        self.accept()
+        self._dlg.accept()
+
+    def exec(self):
+        return self._dlg.exec()
+
+    @property
+    def result(self):
+        return self._result
+
+    @result.setter
+    def result(self, value):
+        self._result = value
 
 
 # ── Import Deep-Link Dialog ───────────────────────────────────────────────
-class ImportDialog(QDialog):
+class ImportDialog:
     def __init__(self, parent):
-        super().__init__(parent)
-        self.setWindowTitle("Import tt://")
-        self.setMinimumWidth(440)
+        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton
         self.result: Optional[ServerProfile] = None
+        self._dlg = QDialog(parent)
+        self._dlg.setWindowTitle("Import tt://")
+        self._dlg.setMinimumWidth(440)
         self._build()
 
     def _build(self):
-        layout = QVBoxLayout(self)
+        from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton
+        layout = QVBoxLayout(self._dlg)
         layout.setContentsMargins(16, 12, 16, 12)
 
         layout.addWidget(QLabel("Paste tt:// deep-link:"))
@@ -159,7 +194,7 @@ class ImportDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
+        cancel_btn.clicked.connect(self._dlg.reject)
         import_btn = QPushButton("Import")
         import_btn.setDefault(True)
         import_btn.clicked.connect(self._do_import)
@@ -168,41 +203,62 @@ class ImportDialog(QDialog):
         layout.addLayout(btn_row)
 
     def _do_import(self):
+        from .config import parse_deeplink
         uri = self._text.toPlainText().strip()
         if not uri:
-            self.reject()
+            self._dlg.reject()
             return
         profile = parse_deeplink(uri)
         if profile:
             self.result = profile
-            self.accept()
+            self._dlg.accept()
         else:
-            QMessageBox.warning(self, "Error", "Could not parse deep-link.")
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self._dlg, "Invalid Link",
+                                "Could not parse the tt:// link.\n\n"
+                                "Make sure it's a valid TrustTunnel deep-link.")
+
+    def exec(self):
+        return self._dlg.exec()
 
 
 # ── Main Window ────────────────────────────────────────────────────────────
-class TrustTunnelWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("TrustTunnel VPN")
-        self.setMinimumSize(520, 440)
-        self.resize(860, 640)
+class TrustTunnelWindow:
+    def __init__(self, app):
+        from PyQt6.QtWidgets import QMainWindow
+        self._app = app
+        self._init_ui()
 
+    def _init_ui(self):
+        from PyQt6.QtWidgets import (
+            QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+            QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
+            QLabel, QLineEdit, QTextEdit, QTabWidget, QSplitter,
+            QAbstractItemView, QFrame, QSizePolicy, QSpacerItem,
+            QMenuBar, QMenu, QStatusBar, QToolBar, QComboBox,
+            QCheckBox, QSpinBox, QSystemTrayIcon, QMessageBox,
+        )
+        from PyQt6.QtCore import Qt, QTimer
+        from PyQt6.QtGui import QFont, QColor, QIcon, QAction, QPixmap, QPainter, QPen
+
+        self._bridge = _SignalBridge()
         self.client = ClientManager()
         self.servers: list[ServerProfile] = load_servers()
         self._selected_index: Optional[int] = None
         self._last_state = None
         self._log_idx = 0
+        self._quitting = False
 
-        # Signal bridge for thread-safe UI
-        self._bridge = _SignalBridge()
+        # Signal bridge
         self._bridge.status_changed.connect(self._on_status_changed)
         self._bridge.log_line.connect(self._on_log_line)
 
+        # Build UI
         self._build()
+        self._refresh_server_list()
 
-        # Tray icon — created with placeholder, updated by _update_tray_icon
-        self._tray_icon = QSystemTrayIcon(self)
+        # Tray icon
+        self._tray_icon = QSystemTrayIcon(self._main_window)
         self._tray_icon.setToolTip("TrustTunnel VPN — Disconnected")
         self._tray_menu = QMenu()
         self._tray_icon.setContextMenu(self._tray_menu)
@@ -210,29 +266,39 @@ class TrustTunnelWindow(QMainWindow):
         self._update_tray_icon(ClientState.DISCONNECTED)
         self._tray_icon.show()
 
-        # Store per-server action references for enable/disable
-        self._tray_server_actions: list[tuple[QAction, int]] = []
-
-        # Now refresh server list (which also rebuilds tray menu)
-        self._refresh_server_list()
+        self._tray_server_actions = []
+        self._rebuild_tray_menu()
 
         # Poll timer
-        self._poll_timer = QTimer(self)
+        self._poll_timer = QTimer(self._main_window)
         self._poll_timer.timeout.connect(self._poll_status)
         self._poll_timer.start(300)
 
-        self._quitting = False
-
-    # ── Build UI ──────────────────────────────────────────────────────
-
     def _build(self):
+        from PyQt6.QtWidgets import (
+            QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+            QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
+            QLabel, QLineEdit, QTextEdit, QTabWidget, QSplitter,
+            QAbstractItemView, QFrame, QSizePolicy, QSpacerItem,
+            QMenuBar, QMenu, QStatusBar, QToolBar, QComboBox,
+            QCheckBox, QSpinBox, QMessageBox,
+        )
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QFont, QColor
+
+        self._main_window = QMainWindow()
+        self._main_window.setWindowTitle("TrustTunnel VPN")
+        self._main_window.setMinimumSize(520, 440)
+        self._main_window.resize(860, 640)
+        self._main_window.closeEvent = self._on_close_event
+
         central = QWidget()
-        self.setCentralWidget(central)
+        self._main_window.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # ── Title bar ──
+        # Title bar
         title_bar = QHBoxLayout()
         title_bar.setContentsMargins(8, 4, 8, 4)
         title_label = QLabel("TrustTunnel VPN")
@@ -247,26 +313,29 @@ class TrustTunnelWindow(QMainWindow):
         title_bar.addStretch()
         main_layout.addLayout(title_bar)
 
-        # ── Splitter: notebook on top, console below ──
+        # Splitter: server list / console
         splitter = QSplitter(Qt.Orientation.Vertical)
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(splitter, 1)
 
-        # Top: notebook with tabs
+        # Notebook (tabs)
         self._notebook = QTabWidget()
         splitter.addWidget(self._notebook)
-        splitter.setStretchFactor(0, 2)
 
-        # ── Servers tab ──
+        # Servers tab
         servers_tab = QWidget()
         servers_layout = QVBoxLayout(servers_tab)
-        servers_layout.setContentsMargins(8, 4, 8, 4)
-        servers_layout.setSpacing(4)
+        servers_layout.setContentsMargins(0, 0, 0, 0)
+        servers_layout.setSpacing(0)
 
-        # Toolbar: Add Server + Import tt:// on the right
+        # Toolbar
         toolbar = QHBoxLayout()
-        toolbar.addWidget(QLabel("Servers"))
+        toolbar.setContentsMargins(8, 4, 8, 4)
         toolbar.addStretch()
-        import_btn = QPushButton("Import tt://")
+        self._import_text = QLineEdit()
+        self._import_text.setPlaceholderText("tt://...")
+        self._import_text.setMaximumWidth(260)
+        toolbar.addWidget(self._import_text)
+        import_btn = QPushButton("Import")
         import_btn.clicked.connect(self._import_deeplink)
         toolbar.addWidget(import_btn)
         add_btn = QPushButton("+ Add Server")
@@ -276,96 +345,78 @@ class TrustTunnelWindow(QMainWindow):
 
         # Server table
         self._table = QTableWidget(0, 6)
-        self._table.setHorizontalHeaderLabels(
-            ["Server", "Connect", "Hostname", "Address", "Username", ""]
-        )
+        self._table.setHorizontalHeaderLabels(["Server", " ", "Host", "Address", "User", " "])
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self._table.verticalHeader().setVisible(False)
         self._table.setShowGrid(False)
         self._table.setAlternatingRowColors(False)
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-
-        # Column widths
         hdr = self._table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)   # Server name
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)      # Connect btn
-        hdr.resizeSection(1, 90)
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)   # Hostname
-        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)   # Address
-        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)   # Username
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)     # Actions
-        hdr.resizeSection(5, 70)
-
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        hdr.setSectionResizeMode(5, QHeaderView.ResizeMode.Fixed)
+        self._table.setColumnWidth(1, 90)
+        self._table.setColumnWidth(5, 70)
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
         servers_layout.addWidget(self._table)
-
         self._notebook.addTab(servers_tab, "Servers")
 
-        # ── Bypass tab ──
+        # Bypass tab
         bypass_tab = QWidget()
         bypass_layout = QVBoxLayout(bypass_tab)
         bypass_layout.setContentsMargins(8, 8, 8, 8)
-
-        bypass_layout.addWidget(QLabel(
-            "Domains and IPs that will bypass the VPN tunnel.\n"
-            "Use masks: *.ru, *.example.com, 192.168.0.0/16, *:443"
-        ))
-
         self._bypass_list = QTableWidget(0, 1)
         self._bypass_list.setHorizontalHeaderLabels(["Mask"])
-        self._bypass_list.horizontalHeader().setSectionResizeMode(
-            0, QHeaderView.ResizeMode.Stretch
-        )
+        self._bypass_list.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self._bypass_list.verticalHeader().setVisible(False)
         bypass_layout.addWidget(self._bypass_list)
-
         bypass_btn_row = QHBoxLayout()
         self._bypass_entry = QLineEdit()
         self._bypass_entry.setPlaceholderText("Add exclusion mask...")
         self._bypass_entry.returnPressed.connect(self._add_exclusion)
         bypass_btn_row.addWidget(self._bypass_entry)
-        add_exc_btn = QPushButton("Add")
+        add_exc_btn = QPushButton("+")
         add_exc_btn.clicked.connect(self._add_exclusion)
         bypass_btn_row.addWidget(add_exc_btn)
-        del_exc_btn = QPushButton("Delete")
+        del_exc_btn = QPushButton("−")
         del_exc_btn.clicked.connect(self._delete_exclusion)
         bypass_btn_row.addWidget(del_exc_btn)
         bypass_layout.addLayout(bypass_btn_row)
-
         self._bypass_status = QLabel("Select a server to manage bypass rules.")
         self._bypass_status.setStyleSheet("color: #888;")
         bypass_layout.addWidget(self._bypass_status)
-
         self._notebook.addTab(bypass_tab, "Bypass")
 
-        # ── Console (bottom pane) ──
-        console_frame = QWidget()
-        console_layout = QVBoxLayout(console_frame)
+        # Console
+        console_widget = QWidget()
+        console_layout = QVBoxLayout(console_widget)
         console_layout.setContentsMargins(4, 4, 4, 4)
-
-        console_header = QHBoxLayout()
-        console_header.addWidget(QLabel("Console"))
-        console_header.addStretch()
-        copy_btn = QPushButton("Copy All")
+        console_toolbar = QHBoxLayout()
+        copy_btn = QPushButton("Copy")
         copy_btn.clicked.connect(self._copy_console)
-        console_header.addWidget(copy_btn)
+        console_toolbar.addWidget(copy_btn)
         clear_btn = QPushButton("Clear")
         clear_btn.clicked.connect(self._clear_console)
-        console_header.addWidget(clear_btn)
-        console_layout.addLayout(console_header)
-
+        console_toolbar.addWidget(clear_btn)
+        console_toolbar.addStretch()
+        console_layout.addLayout(console_toolbar)
         self._console = QTextEdit()
         self._console.setReadOnly(True)
         self._console.setFont(QFont("Menlo", 10))
         console_layout.addWidget(self._console)
+        splitter.addWidget(console_widget)
+        splitter.setSizes([400, 140])
 
-        splitter.addWidget(console_frame)
-        splitter.setStretchFactor(1, 3)
-
-    # ── Server list ───────────────────────────────────────────────────
+    # ── Server list ──────────────────────────────────────────────────────
 
     def _refresh_server_list(self):
+        from PyQt6.QtGui import QFont, QColor
+        from PyQt6.QtWidgets import QTableWidgetItem
+
         self._table.setRowCount(0)
         connected_name = (
             self.client.status.server_name if self.client.is_connected() else None
@@ -379,7 +430,6 @@ class TrustTunnelWindow(QMainWindow):
             is_busy = (state in (ClientState.CONNECTING, ClientState.CHECKING)
                        and connected_name == s.name)
 
-            # Colors
             if is_connected:
                 row_bg, text_fg = QColor(13, 40, 24), QColor(78, 201, 176)
             elif is_busy:
@@ -387,14 +437,12 @@ class TrustTunnelWindow(QMainWindow):
             else:
                 row_bg, text_fg = QColor(26, 26, 26), QColor(255, 255, 255)
 
-            # Column 0: Server name
             name_item = QTableWidgetItem(s.name)
             name_item.setForeground(text_fg)
             name_item.setFont(QFont("Helvetica", 11, QFont.Weight.Bold))
             name_item.setBackground(row_bg)
             self._table.setItem(i, 0, name_item)
 
-            # Column 1: Connect / Disconnect button
             if is_busy:
                 btn_text, btn_color, btn_fg = "…", "#2a2a00", "#cca700"
             elif is_connected:
@@ -411,26 +459,23 @@ class TrustTunnelWindow(QMainWindow):
             conn_btn.clicked.connect(lambda checked, idx=i: self._toggle_connection(idx))
             self._table.setCellWidget(i, 1, conn_btn)
 
-            # Column 2: Hostname
             host_item = QTableWidgetItem(s.endpoint.hostname)
             host_item.setForeground(text_fg)
             host_item.setBackground(row_bg)
             self._table.setItem(i, 2, host_item)
 
-            # Column 3: Address
             addr = ",".join(s.endpoint.addresses) if s.endpoint.addresses else ""
             addr_item = QTableWidgetItem(addr)
             addr_item.setForeground(text_fg)
             addr_item.setBackground(row_bg)
             self._table.setItem(i, 3, addr_item)
 
-            # Column 4: Username
             user_item = QTableWidgetItem(s.endpoint.username)
             user_item.setForeground(text_fg)
             user_item.setBackground(row_bg)
             self._table.setItem(i, 4, user_item)
 
-            # Column 5: Edit + Delete icons
+            from PyQt6.QtWidgets import QWidget, QHBoxLayout
             actions_widget = QWidget()
             actions_layout = QHBoxLayout(actions_widget)
             actions_layout.setContentsMargins(2, 0, 2, 0)
@@ -454,13 +499,13 @@ class TrustTunnelWindow(QMainWindow):
 
             self._table.setCellWidget(i, 5, actions_widget)
 
-        # Select current row
         if self._selected_index is not None and self._selected_index < len(self.servers):
             self._table.selectRow(self._selected_index)
 
         self._rebuild_tray_menu()
 
     def _on_selection_changed(self):
+        from PyQt6.QtWidgets import QTableWidget
         selected = self._table.selectedItems()
         if selected:
             self._selected_index = selected[0].row()
@@ -471,27 +516,31 @@ class TrustTunnelWindow(QMainWindow):
     # ── CRUD ──────────────────────────────────────────────────────────
 
     def _add_server(self):
-        dlg = AddEditDialog(self)
+        from PyQt6.QtWidgets import QDialog
+        dlg = AddEditDialog(self._main_window, None)
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
             self.servers.append(dlg.result)
             self._save_and_refresh()
             self._selected_index = len(self.servers) - 1
             self._refresh_server_list()
 
-    def _edit_server_by_index(self, idx: int):
+    def _edit_server_by_index(self, idx):
+        from PyQt6.QtWidgets import QDialog
         if idx >= len(self.servers):
             return
-        dlg = AddEditDialog(self, profile=self.servers[idx])
+        dlg = AddEditDialog(self._main_window, self.servers[idx])
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
             self.servers[idx] = dlg.result
             self._save_and_refresh()
+            self._refresh_server_list()
 
-    def _delete_server_by_index(self, idx: int):
+    def _delete_server_by_index(self, idx):
+        from PyQt6.QtWidgets import QMessageBox
         if idx >= len(self.servers):
             return
-        s = self.servers[idx]
+        name = self.servers[idx].name
         reply = QMessageBox.question(
-            self, "Delete", f"Delete '{s.name}'?",
+            self._main_window, "Delete", f"Delete server '{name}'?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -502,36 +551,37 @@ class TrustTunnelWindow(QMainWindow):
                 elif self._selected_index > idx:
                     self._selected_index -= 1
             self._save_and_refresh()
+            self._refresh_server_list()
+
+    def _save_and_refresh(self):
+        from .config import save_servers
+        save_servers(self.servers)
 
     def _import_deeplink(self):
-        dlg = ImportDialog(self)
+        from PyQt6.QtWidgets import QDialog
+        dlg = ImportDialog(self._main_window)
         if dlg.exec() == QDialog.DialogCode.Accepted and dlg.result:
             self.servers.append(dlg.result)
             self._save_and_refresh()
             self._log(f"Imported: {dlg.result.name}")
+            self._refresh_server_list()
 
-    def _save_and_refresh(self):
-        save_servers(self.servers)
-        self._refresh_server_list()
-
-    # ── Bypass ────────────────────────────────────────────────────────
+    # ── Bypass ─────────────────────────────────────────────────────────
 
     def _refresh_bypass_list(self):
+        from PyQt6.QtWidgets import QTableWidgetItem
         self._bypass_list.setRowCount(0)
         if self._selected_index is None:
-            self._bypass_status.setText(
-                "Select a server in the Servers tab to manage bypass rules."
-            )
+            self._bypass_status.setText("Select a server to manage bypass rules.")
             return
         profile = self.servers[self._selected_index]
-        self._bypass_status.setText(
-            f"Bypass rules for: {profile.name} ({len(profile.exclusions)} rules)"
-        )
+        self._bypass_status.setText(f"Bypass rules for: {profile.name}")
         for i, exc in enumerate(profile.exclusions):
             self._bypass_list.insertRow(i)
             self._bypass_list.setItem(i, 0, QTableWidgetItem(f"  {exc}"))
 
     def _add_exclusion(self):
+        from .config import save_servers
         mask = self._bypass_entry.text().strip()
         if not mask or self._selected_index is None:
             return
@@ -544,6 +594,7 @@ class TrustTunnelWindow(QMainWindow):
             self._refresh_bypass_list()
 
     def _delete_exclusion(self):
+        from .config import save_servers
         row = self._bypass_list.currentRow()
         if row < 0 or self._selected_index is None:
             return
@@ -586,19 +637,18 @@ class TrustTunnelWindow(QMainWindow):
     def _disconnect(self):
         self._log("--- Disconnecting ---")
         self.client.disconnect()
-        self._refresh_server_list()
 
-    # ── Console ───────────────────────────────────────────────────────
+    # ── Console ────────────────────────────────────────────────────────
 
     def _log(self, text: str):
         self._console.append(text)
 
-    def _clear_console(self):
-        self._console.clear()
-
     def _copy_console(self):
         self._console.selectAll()
         self._console.copy()
+
+    def _clear_console(self):
+        self._console.clear()
 
     # ── Status polling ────────────────────────────────────────────────
 
@@ -619,7 +669,6 @@ class TrustTunnelWindow(QMainWindow):
         self._status_text.setText(label)
         self._status_text.setStyleSheet(f"color: {color}; font-size: 10px;")
 
-        # Append new log lines
         lines = status.log_lines
         if not hasattr(self, "_log_idx"):
             self._log_idx = 0
@@ -638,43 +687,29 @@ class TrustTunnelWindow(QMainWindow):
     def _on_log_line(self, line):
         self._log(line)
 
-    # ── Close ─────────────────────────────────────────────────────────
-
-    def _tray_activated(self, reason):
-        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
-            self.show()
-            self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
-            self.raise_()
-            self.activateWindow()
-
-    def _quit(self):
-        self._quitting = True
-        self.client.disconnect()
-        self._tray_icon.hide()
-        QApplication.quit()
+    # ── Tray icon ─────────────────────────────────────────────────────
 
     def _update_tray_icon(self, state: ClientState):
-        """Update tray icon color and tooltip based on connection state."""
-        # 16x16 icon with a shield/tunnel shape
+        from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
+        from PyQt6.QtCore import Qt
+
         pm = QPixmap(16, 16)
         pm.fill(Qt.GlobalColor.transparent)
         p = QPainter(pm)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if state == ClientState.CONNECTED:
-            color = QColor(78, 201, 176)  # green
+            color = QColor(78, 201, 176)
         elif state in (ClientState.CONNECTING, ClientState.CHECKING):
-            color = QColor(204, 167, 0)   # yellow
+            color = QColor(204, 167, 0)
         elif state == ClientState.ERROR:
-            color = QColor(244, 71, 71)   # red
+            color = QColor(244, 71, 71)
         else:
-            color = QColor(102, 102, 102) # grey
+            color = QColor(102, 102, 102)
 
-        # Draw a rounded rect "shield" icon
         p.setPen(QPen(color, 1))
         p.setBrush(color)
         p.drawRoundedRect(2, 1, 12, 14, 2, 2)
-        # Draw a small "tunnel" hole
         p.setPen(QPen(QColor(30, 30, 30), 1))
         p.setBrush(QColor(30, 30, 30))
         p.drawEllipse(5, 5, 6, 6)
@@ -693,7 +728,7 @@ class TrustTunnelWindow(QMainWindow):
         self._tray_icon.setToolTip(f"TrustTunnel VPN — {labels.get(state, 'Unknown')}")
 
     def _rebuild_tray_menu(self):
-        """Rebuild the tray context menu with server list."""
+        from PyQt6.QtGui import QAction
         self._tray_menu.clear()
         self._tray_server_actions.clear()
 
@@ -701,9 +736,8 @@ class TrustTunnelWindow(QMainWindow):
             self.client.status.server_name if self.client.is_connected() else None
         )
 
-        # Server entries
         for i, profile in enumerate(self.servers):
-            action = QAction(profile.name, self)
+            action = QAction(profile.name, self._main_window)
             if profile.name == connected_name:
                 action.setCheckable(True)
                 action.setChecked(True)
@@ -714,30 +748,25 @@ class TrustTunnelWindow(QMainWindow):
         if self.servers:
             self._tray_menu.addSeparator()
 
-        # Add Server
-        add_action = QAction("+ Add Server", self)
+        add_action = QAction("+ Add Server", self._main_window)
         add_action.triggered.connect(self._add_server_from_tray)
         self._tray_menu.addAction(add_action)
 
-        # Import tt://
-        import_action = QAction("Import tt://", self)
+        import_action = QAction("Import tt://", self._main_window)
         import_action.triggered.connect(self._import_from_tray)
         self._tray_menu.addAction(import_action)
 
         self._tray_menu.addSeparator()
 
-        # Show
-        show_action = QAction("Show Window", self)
+        show_action = QAction("Show Window", self._main_window)
         show_action.triggered.connect(self._show_from_tray)
         self._tray_menu.addAction(show_action)
 
-        # Quit
-        quit_action = QAction("Quit", self)
+        quit_action = QAction("Quit", self._main_window)
         quit_action.triggered.connect(self._quit)
         self._tray_menu.addAction(quit_action)
 
     def _tray_toggle(self, idx: int):
-        """Toggle connection for a server from tray menu."""
         self._toggle_connection(idx)
         self._show_from_tray()
 
@@ -750,18 +779,35 @@ class TrustTunnelWindow(QMainWindow):
         self._show_from_tray()
 
     def _show_from_tray(self):
-        self.show()
-        self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
-        self.raise_()
-        self.activateWindow()
+        from PyQt6.QtCore import Qt
+        mw = self._main_window
+        mw.show()
+        mw.setWindowState(mw.windowState() & ~Qt.WindowState.WindowMinimized)
+        mw.raise_()
+        mw.activateWindow()
 
-    def closeEvent(self, event):
+    def _tray_activated(self, reason):
+        from PyQt6.QtWidgets import QSystemTrayIcon
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._show_from_tray()
+
+    def _quit(self):
+        self._quitting = True
+        self.client.disconnect()
+        self._tray_icon.hide()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.quit()
+
+    # ── Close ─────────────────────────────────────────────────────────
+
+    def _on_close_event(self, event):
+        from PyQt6.QtWidgets import QMessageBox
         if self._quitting:
             event.accept()
             return
         if self.client.is_connected():
             reply = QMessageBox.question(
-                self, "Quit", "Disconnect and quit?",
+                self._main_window, "Quit", "Disconnect and quit?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             )
             if reply != QMessageBox.StandardButton.Yes:
@@ -772,15 +818,21 @@ class TrustTunnelWindow(QMainWindow):
             self._tray_icon.hide()
             event.accept()
             return
-        # Not connected — minimize to tray
         event.ignore()
-        self.hide()
+        self._main_window.hide()
         self._tray_icon.show()
+
+    # ── Show ──────────────────────────────────────────────────────────
+
+    def show(self):
+        self._main_window.show()
+
+    def exec(self):
+        pass  # Compatibility
 
 
 # ── Entry point ───────────────────────────────────────────────────────────
 def _excepthook(exc_type, exc_val, exc_tb):
-    """Write uncaught exceptions to a log file for debugging."""
     import traceback
     log_path = os.path.expanduser("~/Library/Logs/TrustTunnel-crash.log")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
@@ -789,17 +841,18 @@ def _excepthook(exc_type, exc_val, exc_tb):
         f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
         traceback.print_exception(exc_type, exc_val, exc_tb, file=f)
         f.write("\n")
-    # Also print to stderr
     traceback.print_exception(exc_type, exc_val, exc_tb)
 
 sys.excepthook = _excepthook
 
+
 def main():
+    from PyQt6.QtWidgets import QApplication
+
     app = QApplication(sys.argv)
     app.setPalette(_dark_palette())
     app.setStyle("Fusion")
 
-    # Global stylesheet for consistent dark theme
     app.setStyleSheet("""
         QMainWindow { background: #1e1e1e; }
         QWidget { background: #1e1e1e; color: #d4d4d4; }
@@ -820,14 +873,6 @@ def main():
         QStatusBar { background: #252525; }
     """)
 
-    # Ensure Qt platform plugins can be found in the bundle
-    if getattr(sys, 'frozen', False):
-        plugin_path = os.path.join(sys._MEIPASS, 'PyQt6', 'Qt6', 'plugins')
-        if not os.path.isdir(plugin_path):
-            plugin_path = os.path.join(sys._MEIPASS, 'PyQt6', 'plugins')
-        if os.path.isdir(plugin_path):
-            os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = plugin_path
-
-    window = TrustTunnelWindow()
+    window = TrustTunnelWindow(app)
     window.show()
     sys.exit(app.exec())
