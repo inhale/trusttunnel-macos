@@ -13,17 +13,17 @@ echo ""
 echo "=== Checking Python + PyQt6 ==="
 PYTHON=""
 PYTHON_OK=""
-
 # Check a single candidate: prints version info if suitable, fails otherwise
+# We avoid importing ANY Qt modules (which can hang waiting for a display server)
+# and just check the Python version + that PyQt6 package metadata is importable.
 _check_py() {
     local py="$1"
     [ -x "$py" ] || return 1
     "$py" -c "
-import sys
-assert sys.version_info >= (3, 11), f'need 3.11+, got {sys.version_info.major}.{sys.version_info.minor}'
-from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt, PYQT_VERSION_STR
-print(f'{sys.version_info.major}.{sys.version_info.minor}  PyQt6={PYQT_VERSION_STR}')
+import sys, importlib.metadata
+assert sys.version_info >= (3, 11), 'need 3.11+'
+v = importlib.metadata.version('PyQt6')
+print('%d.%d  PyQt6=%s' % (sys.version_info.major, sys.version_info.minor, v))
 " 2>/dev/null
 }
 
@@ -77,13 +77,16 @@ done
 _DEBUG_LOG=""
 for candidate in $_candidates; do
     [ -n "$candidate" ] || continue
+    printf "  checking %s ... " "$candidate" >&2
     _result=$(_check_py "$candidate" 2>/dev/null) || true
     _DEBUG_LOG="${_DEBUG_LOG}  ${candidate} -> '${_result}'\n"
     if [ -n "$_result" ]; then
+        printf "OK (%s)\n" "$result" >&2
         PYTHON="$candidate"
         PYTHON_OK="$_result"
         break
     fi
+    printf "no\n" >&2
 done
 
 # If no suitable Python — give clear fix instructions
