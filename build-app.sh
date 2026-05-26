@@ -184,6 +184,18 @@ fi
 echo "Found: $PYTHON  ($PYTHON_OK)"
 echo ""
 
+# 1.4. On Apple Silicon, prefer arm64 Python to avoid Rosetta issues
+if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+    PY_FILE=$(command -v "$PYTHON" 2>/dev/null || echo "$PYTHON")
+    if file "$PY_FILE" 2>/dev/null | grep -q "x86_64"; then
+        echo "  ⚠ Python is x86_64 — app will run under Rosetta on M1/M2/M3 Macs."
+        echo "    For native arm64 builds, install arm64 Python:"
+        echo "    arch -arm64 brew install python@3.12"
+        echo "    Then re-run this script."
+        echo ""
+    fi
+fi
+
 # 1.5. Check PyQt6 version — >= 6.10 has qdarwinpermissionplugin which crashes
 #     with console=False on macOS (CFBundleCopyBundleURL in static initializer).
 #     Auto-downgrade to 6.9.1 which is the latest safe version.
