@@ -642,6 +642,7 @@ class TrustTunnelWindow(QMainWindow):
     def _tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self.show()
+            self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
             self.raise_()
             self.activateWindow()
 
@@ -737,24 +738,19 @@ class TrustTunnelWindow(QMainWindow):
     def _tray_toggle(self, idx: int):
         """Toggle connection for a server from tray menu."""
         self._toggle_connection(idx)
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        self._show_from_tray()
 
     def _add_server_from_tray(self):
         self._add_server()
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        self._show_from_tray()
 
     def _import_from_tray(self):
         self._import_deeplink()
-        self.show()
-        self.raise_()
-        self.activateWindow()
+        self._show_from_tray()
 
     def _show_from_tray(self):
         self.show()
+        self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
         self.raise_()
         self.activateWindow()
 

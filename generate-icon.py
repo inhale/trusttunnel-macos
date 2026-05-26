@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a proper TrustTunnel app icon as .icns file using Pillow."""
+"""Generate a proper TrustTunnel app icon as .icns file using Pillow + iconutil."""
 import os
 import sys
 import subprocess
@@ -8,7 +8,7 @@ import shutil
 
 def create_icon(size, output_path):
     """Create a shield+VPN icon PNG at the given size."""
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image, ImageDraw
 
     img = Image.new('RGBA', (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -57,26 +57,37 @@ def create_icon(size, output_path):
 
 def main():
     out = sys.argv[1] if len(sys.argv) > 1 else 'icon.icns'
+
     tmpdir = tempfile.mkdtemp()
+    try:
+        # Generate all required sizes
+        # iconutil needs: 16x16, 32x32, 128x128, 256x256, 512x512
+        # Plus @2x versions: icon_16x16@2x = 32x32, etc.
+        sizes = [16, 32, 128, 256, 512]
+        for s in sizes:
+            create_icon(s, os.path.join(tmpdir, f'{s}x{s}.png'))
 
-    sizes = [16, 32, 64, 128, 256, 512, 1024]
-    for s in sizes:
-        create_icon(s, os.path.join(tmpdir, f'{s}x{s}.png'))
+        # Build iconset directory
+        iconset = os.path.join(tmpdir, 'trusttunnel.iconset')
+        os.makedirs(iconset)
 
-    # Build iconset
-    iconset = os.path.join(tempfile.mkdtemp(), 'trusttunnel.iconset')
-    os.makedirs(iconset, exist_ok=True)
-    for s in sizes:
-        src = os.path.join(tmpdir, f'{s}x{s}.png')
-        os.symlink(src, os.path.join(iconset, f'icon_{s}x{s}.png'))
-        if s <= 512:
-            os.symlink(src, os.path.join(iconset, f'icon_{s}x{s}@2x.png'))
+        # Standard sizes
+        for s in sizes:
+            src = os.path.join(tmpdir, f'{s}x{s}.png')
+            shutil.copy2(src, os.path.join(iconset, f'icon_{s}x{s}.png'))
 
-    subprocess.run(['iconutil', '-c', 'icns', iconset, '-o', out], check=True)
-    print(f"Created {out}")
+        # @2x sizes (16@2x=32, 32@2x=64, 128@2x=256, 256@2x=512)
+        retinas = [(16, 32), (32, 64), (128, 256), (256, 512)]
+        for small, large in retinas:
+            src = os.path.join(tmpdir, f'{large}x{large}.png')
+            shutil.copy2(src, os.path.join(iconset, f'icon_{small}x{small}@2x.png'))
 
-    shutil.rmtree(tmpdir)
-    shutil.rmtree(iconset)
+        # Convert to .icns
+        subprocess.run(['iconutil', '-c', 'icns', iconset, '-o', out], check=True)
+        print(f"Created {out}")
+
+    finally:
+        shutil.rmtree(tmpdir)
 
 if __name__ == '__main__':
     main()

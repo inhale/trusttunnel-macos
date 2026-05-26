@@ -218,16 +218,15 @@ else
     echo "  bin/trusttunnel_client ($(du -sh bin/trusttunnel_client | cut -f1))"
 fi
 
-# 4. Generate icon (if no icon.icns exists)
-if [ ! -f "icon.icns" ]; then
-    echo ""
-    echo "=== Generating icon ==="
-    if [ -f "generate-icon.py" ]; then
-        "$PYTHON" generate-icon.py icon.icns
-        echo "  icon.icns created (shield icon via generate-icon.py)"
-    else
-        echo "  generate-icon.py not found, skipping icon generation"
-    fi
+# 4. Generate icon
+echo ""
+echo "=== Generating icon ==="
+if [ -f "generate-icon.py" ]; then
+    rm -f icon.icns
+    "$PYTHON" generate-icon.py icon.icns
+    echo "  icon.icns created (shield icon via generate-icon.py)"
+else
+    echo "  generate-icon.py not found, skipping icon generation"
 fi
 
 # 5. Build
