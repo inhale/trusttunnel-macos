@@ -1,7 +1,6 @@
 #!/bin/bash
 # Build TrustTunnel.app for macOS distribution (PyQt6)
 # Run this on your Mac (not on VPS — PyInstaller needs target OS)
-set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -11,87 +10,133 @@ echo ""
 
 # 1. Find Python 3.11+ with PyQt6
 echo "=== Checking Python + PyQt6 ==="
+echo ""
+
 PYTHON=""
 PYTHON_OK=""
-# Check a single candidate: prints version info if suitable, fails otherwise
-# We avoid importing ANY Qt modules (which can hang waiting for a display server)
-# and just check the Python version + that PyQt6 package metadata is importable.
-_check_py() {
+
+# Check candidates one by one — each step prints its own status
+check_candidate() {
     local py="$1"
-    [ -x "$py" ] || return 1
-    "$py" -c "
-import sys, importlib.metadata
-assert sys.version_info >= (3, 11), 'need 3.11+'
-v = importlib.metadata.version('PyQt6')
-print('%d.%d  PyQt6=%s' % (sys.version_info.major, sys.version_info.minor, v))
-" 2>/dev/null
+    echo "  [CHECK] $py"
+
+    if [ ! -e "$py" ]; then
+        echo "          -> does not exist"
+        return 1
+    fi
+    if [ ! -x "$py" ]; then
+        echo "          -> not executable"
+        return 1
+    fi
+
+    local raw_version
+    raw_version=$("$py" -c "import sys; print(sys.version.split()[0])" 2>/dev/null)
+    if [ -z "$raw_version" ]; then
+        echo "          -> cannot get version"
+        return 1
+    fi
+    echo "          -> Python $raw_version"
+
+    # Check version >= 3.11
+    local major minor
+    major=$(echo "$raw_version" | cut -d. -f1)
+    minor=$(echo "$raw_version" | cut -d. -f2)
+    if [ "$major" -lt 3 ] || { [ "$major" -eq 3 ] && [ "$minor" -lt 11 ]; }; then
+        echo "          -> version too old (need 3.11+)"
+        return 1
+    fi
+
+    # Check PyQt6 without importing Qt (avoids display hang)
+    local pyqt_version
+    if [ -d "/Library/Frameworks/Python.framework" ]; then
+        # System Python may not have importlib.metadata
+        pyqt_version=$("$py" -c "
+try:
+    import importlib.metadata
+    print(importlib.metadata.version('PyQt6'))
+except Exception:
+    try:
+        import PyQt6.QtCore
+        print(PyQt6.QtCore.PYQT_VERSION_STR)
+    except:
+        pass
+" 2>/dev/null)
+    else
+        pyqt_version=$("$py" -c "
+try:
+    import importlib.metadata
+    print(importlib.metadata.version('PyQt6'))
+except Exception:
+    pass
+" 2>/dev/null)
+    fi
+
+    if [ -z "$pyqt_version" ]; then
+        echo "          -> PyQt6 not installed"
+        return 1
+    fi
+
+    echo "          -> PyQt6 $pyqt_version  ✓"
+    PYTHON="$py"
+    PYTHON_OK="Python $raw_version, PyQt6 $pyqt_version"
+    return 0
 }
 
-# Build deduplicated candidate list in priority order
-# (bash 3.2 compatible — no associative arrays)
-_candidates=""
-_seen=""
+# Search in priority order
+FOUND=0
 
-_add_candidate() {
-    local p="$1"
-    [ -z "$p" ] && return
-    # check if already seen (space-delimited)
-    case " $_seen " in
-        *" $p "*) return ;;
-    esac
-    _seen="$_seen $p"
-    _candidates="$_candidates $p"
-}
-
-# Homebrew arm64 (Apple Silicon)
-for v in 3.13 3.12 3.11; do
-    _add_candidate "/opt/homebrew/bin/python${v}"
-    _add_candidate "/opt/homebrew/opt/python@${v}/bin/python${v}"
-done
-_add_candidate "/opt/homebrew/bin/python3"
-# Homebrew x86_64 (Intel)
-for v in 3.13 3.12 3.11; do
-    _add_candidate "/usr/local/bin/python${v}"
-    _add_candidate "/usr/local/opt/python@${v}/bin/python${v}"
-done
-_add_candidate "/usr/local/bin/python3"
-# MacPorts
-for v in 3.13 3.12 3.11; do
-    _add_candidate "/opt/local/bin/python${v}"
-done
-_add_candidate "/opt/local/bin/python3"
-# pyenv
-_add_candidate "$HOME/.pyenv/shims/python3"
-_add_candidate "$HOME/.pyenv/shims/python3.13"
-_add_candidate "$HOME/.pyenv/shims/python3.12"
-_add_candidate "$HOME/.pyenv/shims/python3.11"
-# System
-_add_candidate "/usr/bin/python3"
-# PATH (last, to avoid shadowing explicit paths)
-for v in python3.13 python3.12 python3.11 python3; do
-    _path_resolved="$(command -v "$v" 2>/dev/null || true)"
-    [ -n "$_path_resolved" ] && _add_candidate "$_path_resolved"
-done
-
-# Search all candidates
-_DEBUG_LOG=""
-for candidate in $_candidates; do
-    [ -n "$candidate" ] || continue
-    printf "  checking %s ... " "$candidate" >&2
-    _result=$(_check_py "$candidate" 2>/dev/null) || true
-    _DEBUG_LOG="${_DEBUG_LOG}  ${candidate} -> '${_result}'\n"
-    if [ -n "$_result" ]; then
-        printf "OK (%s)\n" "$result" >&2
-        PYTHON="$candidate"
-        PYTHON_OK="$_result"
+for candidate in \
+    /opt/homebrew/bin/python3.13 \
+    /opt/homebrew/bin/python3.12 \
+    /opt/homebrew/bin/python3.11 \
+    /opt/homebrew/bin/python3 \
+    /opt/homebrew/opt/python@3.13/bin/python3.13 \
+    /opt/homebrew/opt/python@3.12/bin/python3.12 \
+    /opt/homebrew/opt/python@3.11/bin/python3.11 \
+    /usr/local/bin/python3.13 \
+    /usr/local/bin/python3.12 \
+    /usr/local/bin/python3.11 \
+    /usr/local/bin/python3 \
+    /usr/local/opt/python@3.13/bin/python3.13 \
+    /usr/local/opt/python@3.12/bin/python3.12 \
+    /usr/local/opt/python@3.11/bin/python3.11 \
+    /opt/local/bin/python3.13 \
+    /opt/local/bin/python3.12 \
+    /opt/local/bin/python3.11 \
+    /opt/local/bin/python3 \
+    "$HOME/.pyenv/shims/python3.13" \
+    "$HOME/.pyenv/shims/python3.12" \
+    "$HOME/.pyenv/shims/python3.11" \
+    "$HOME/.pyenv/shims/python3" \
+    /usr/bin/python3 \
+    ; do
+    [ -z "$candidate" ] && continue
+    # Skip duplicates (pyenv shims may resolve to same binary)
+    [ "$candidate" = "$PYTHON" ] 2>/dev/null && continue
+    if check_candidate "$candidate"; then
+        FOUND=1
         break
     fi
-    printf "no\n" >&2
 done
 
-# If no suitable Python — give clear fix instructions
-if [ -z "$PYTHON" ]; then
+# If not found from hardcoded list, try PATH
+if [ "$FOUND" -eq 0 ]; then
     echo ""
+    echo "  Not found in standard locations, trying PATH..."
+    for cmd in python3.13 python3.12 python3.11 python3; do
+        _resolved="$(command -v "$cmd" 2>/dev/null || true)"
+        if [ -n "$_resolved" ] && [ -x "$_resolved" ]; then
+            if check_candidate "$_resolved"; then
+                FOUND=1
+                break
+            fi
+        fi
+    done
+fi
+
+echo ""
+
+if [ "$FOUND" -eq 0 ]; then
     echo "╔══════════════════════════════════════════════════════════════╗"
     echo "║  ⚠  No Python 3.11+ with PyQt6 found.                     ║"
     echo "╠══════════════════════════════════════════════════════════════╣"
@@ -107,32 +152,29 @@ if [ -z "$PYTHON" ]; then
     echo "║  3. Re-run: ./build-app.sh                                   ║"
     echo "║                                                              ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
-    echo ""
-    echo "Debug — candidates checked:"
-    printf "$_DEBUG_LOG"
     exit 1
 fi
 
-echo "Python: $PYTHON  ($PYTHON_OK)"
-
-# 2. Install build deps (if not already)
+echo "Found: $PYTHON  ($PYTHON_OK)"
 echo ""
+
+# 2. Install build dependencies
 echo "=== Checking build dependencies ==="
 
 if ! "$PYTHON" -c "import PyInstaller" 2>/dev/null; then
-    echo "  → Installing PyInstaller..."
+    echo "  -> Installing PyInstaller..."
     "$PYTHON" -m pip install --quiet PyInstaller 2>&1 || {
-        echo "  ✗ Failed to install PyInstaller"
+        echo "  Failed to install PyInstaller"
         exit 1
     }
 fi
-echo "  PyInstaller: $($PYTHON -c "import PyInstaller; print(PyInstaller.__version__)" 2>/dev/null || echo 'ok')"
+echo "  PyInstaller: $("$PYTHON" -c "import PyInstaller; print(PyInstaller.__version__)" 2>/dev/null || echo ok)"
 
 if ! "$PYTHON" -c "import PIL" 2>/dev/null; then
-    echo "  → Installing Pillow..."
+    echo "  -> Installing Pillow..."
     "$PYTHON" -m pip install --quiet Pillow 2>&1 || true
 fi
-echo "  Pillow: $($PYTHON -c "from PIL import __version__; print(__version__)" 2>/dev/null || echo 'ok')"
+echo "  Pillow: $("$PYTHON" -c "from PIL import __version__; print(__version__)" 2>/dev/null || echo ok)"
 
 # 3. Download TrustTunnel client binary (bundled in .app)
 echo ""
@@ -162,18 +204,15 @@ raw = b''
 for y in range(SZ):
     raw += b'\x00'
     for x in range(SZ):
-        r, g, b, a = 37, 99, 235, 255
-        raw += struct.pack('BBBB', r, g, b, a)
-
+        raw += struct.pack('BBBB', 37, 99, 235, 255)
 sig = b'\x89PNG\r\n\x1a\n'
 ihdr = struct.pack('>IIBBBBB', SZ, SZ, 8, 6, 0, 0, 0)
 def chunk(t, d):
     return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
-z = zlib.compress(raw)
-png = sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', z) + chunk(b'IEND', b'')
+png = sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
 with open('icon.png', 'wb') as f: f.write(png)
 "
-    echo "icon.png created"
+    echo "  icon.png created"
 
     if command -v iconutil >/dev/null 2>&1 && command -v sips >/dev/null 2>&1; then
         echo "  Converting to .icns..."
@@ -224,7 +263,7 @@ if [ -d "$APP" ]; then
     echo "=== Installing to /Applications ==="
     rm -rf /Applications/TrustTunnel.app
     cp -R "$APP" /Applications/
-    echo "  → /Applications/TrustTunnel.app"
+    echo "  -> /Applications/TrustTunnel.app"
 
     echo ""
     echo "  Configuring passwordless sudo for VPN client..."
