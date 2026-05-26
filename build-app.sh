@@ -403,8 +403,41 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
 
                 echo "  ✓ Frameworks merged (bundle structure preserved)"
 
-                # Copy Resources from arm64 (same for both archs)
-                cp -R dist_arm64/TrustTunnel.app/Contents/Resources dist/TrustTunnel.app/Contents/
+                # Copy Resources from arm64, then merge arch-specific dylibs from x86_64
+                ARM_RES="dist_arm64/TrustTunnel.app/Contents/Resources"
+                X86_RES="dist_x86_64/TrustTunnel.app/Contents/Resources"
+                OUT_RES="dist/TrustTunnel.app/Contents/Resources"
+                cp -R "$ARM_RES" "$OUT_RES"
+
+                # Lipo-merge Resources/PyQt6/*.abi3.so (these are loaded at runtime)
+                for abi3so in QtCore QtCore.abi3 QtWidgets QtWidgets.abi3 QtGui QtGui.abi3; do
+                    for ext in ".abi3.so" ".so"; do
+                        f="PyQt6/${abi3so}${ext}"
+                        arm_file="$ARM_RES/$f"
+                        x86_file="$X86_RES/$f"
+                        out_file="$OUT_RES/$f"
+                        # Strip .abi3.so → .so matching
+                        [ -f "$arm_file" ] && [ -f "$x86_file" ] || continue
+                        arm_arch=$(file "$arm_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                        x86_arch=$(file "$x86_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                        if [ "$arm_arch" != "$x86_arch" ]; then
+                            lipo -create "$arm_file" "$x86_file" -output "$out_file" 2>/dev/null && echo "    Resources/$f: $arm_arch + $x86_arch -> merged"
+                        fi
+                    done
+                done
+
+                # Also lipo-merge any other .so/.dylib in Resources that differs by arch
+                find "$ARM_RES" -name "*.so" -o -name "*.dylib" | while read -r arm_file; do
+                    rel="${arm_file#$ARM_RES/}"
+                    x86_file="$X86_RES/$rel"
+                    out_file="$OUT_RES/$rel"
+                    [ -f "$x86_file" ] && [ -f "$out_file" ] || continue
+                    arm_arch=$(file "$arm_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                    x86_arch=$(file "$x86_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                    if [ "$arm_arch" != "$x86_arch" ]; then
+                        lipo -create "$arm_file" "$x86_file" -output "$out_file" 2>/dev/null && echo "    Resources/$rel: merged"
+                    fi
+                done
 
             else
                 echo "  ✗ One of the builds failed. Using arm64 only."
