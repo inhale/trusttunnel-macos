@@ -345,10 +345,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                     -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel
 
                 # Copy Info.plist from arm64 build (contains LSUIElement, console=True settings)
-                cp -v dist_arm64/TrustTunnel.app/Contents/Info.plist \
-                       dist/TrustTunnel.app/Contents/Info.plist 2>&1
-                echo "  [DEBUG] merged Info.plist LSUIElement after cp:"
-                grep -a "LSUIElement" dist/TrustTunnel.app/Contents/Info.plist || echo "    NOT FOUND AFTER CP"
+                cp dist_arm64/TrustTunnel.app/Contents/Info.plist dist/TrustTunnel.app/Contents/Info.plist
 
                 # Merge Frameworks — lipo only the key dylibs that differ by arch
                 # Framework bundles (Python.framework, Qt*.framework) must stay intact
