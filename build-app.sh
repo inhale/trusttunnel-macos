@@ -443,7 +443,18 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                 echo "  ✗ One of the builds failed. Using arm64 only."
                 cp -R dist_arm64/TrustTunnel.app dist/TrustTunnel.app
             fi
-            rm -rf dist_arm64 dist_x86_64
+            # Debug: show where .abi3.so files are in each build
+            echo "  [DEBUG] arm64 .abi3.so files:"
+            find dist_arm64/TrustTunnel.app -name "*.abi3.so" -exec echo "    {}" \; 2>/dev/null || echo "    (none)"
+            echo "  [DEBUG] x86_64 .abi3.so files:"
+            find dist_x86_64/TrustTunnel.app -name "*.abi3.so" -exec echo "    {}" \; 2>/dev/null || echo "    (none)"
+            echo "  [DEBUG] arm64 Resources/ top-level:"
+            ls dist_arm64/TrustTunnel.app/Contents/Resources/ 2>/dev/null | head -20
+            echo "  [DEBUG] x86_64 Resources/ top-level:"
+            ls dist_x86_64/TrustTunnel.app/Contents/Resources/ 2>/dev/null | head -20
+
+            # Don't clean up — leave dirs for inspection
+            # rm -rf dist_arm64 dist_x86_64
         fi
     else
         echo "  No x86_64 Python found — building arm64 only"
