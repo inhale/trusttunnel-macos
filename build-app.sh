@@ -373,6 +373,28 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                     fi
                 done
 
+                # Lipo-merge ALL .so files in python3.x/lib-dynload/ (Python C extensions)
+                echo "  Merging Python C extensions (lib-dynload)..."
+                for pyver in 3.11 3.12 3.13; do
+                    ARM_DYNLOAD="$ARM_FW/python${pyver}/lib-dynload"
+                    X86_DYNLOAD="$X86_FW/python${pyver}/lib-dynload"
+                    OUT_DYNLOAD="$OUT_FW/python${pyver}/lib-dynload"
+                    if [ -d "$ARM_DYNLOAD" ] && [ -d "$X86_DYNLOAD" ]; then
+                        find "$ARM_DYNLOAD" -name "*.so" | while read -r arm_so; do
+                            rel="${arm_so#$ARM_DYNLOAD/}"
+                            x86_so="$X86_DYNLOAD/$rel"
+                            out_so="$OUT_DYNLOAD/$rel"
+                            if [ -f "$x86_so" ]; then
+                                arm_arch=$(file "$arm_so" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                                x86_arch=$(file "$x86_so" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                                if [ "$arm_arch" != "$x86_arch" ]; then
+                                    lipo -create "$arm_so" "$x86_so" -output "$out_so" 2>/dev/null && echo "    python${pyver}/lib-dynload/$rel: merged"
+                                fi
+                            fi
+                        done
+                    fi
+                done
+
                 echo "  ✓ Frameworks merged (bundle structure preserved)"
 
                 # Copy Resources from arm64 (same for both archs)
