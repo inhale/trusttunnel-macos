@@ -549,10 +549,10 @@ class TrustTunnelWindow(tk.Tk):
                      ).pack(side=side, padx=padx, fill="y")
 
         # Canvas-based server list — no ttk theme interference
-        list_frame = tk.Frame(servers_tab, bg="#2d2d2d")
+        list_frame = tk.Frame(servers_tab, bg="#0f0f0f")
         list_frame.pack(fill="both", expand=True)
 
-        self._srv_canvas = tk.Canvas(list_frame, bg="#2d2d2d",
+        self._srv_canvas = tk.Canvas(list_frame, bg="#0f0f0f",
                                      highlightthickness=0, bd=0)
         _csv_sb = ttk.Scrollbar(list_frame, orient="vertical",
                                 command=self._srv_canvas.yview)
@@ -561,7 +561,7 @@ class TrustTunnelWindow(tk.Tk):
         self._srv_canvas.pack(fill="both", expand=True)
 
         # Overlay frame for Connect/Disconnect buttons — placed over canvas
-        self._btn_overlay = tk.Frame(list_frame, bg="#2d2d2d",
+        self._btn_overlay = tk.Frame(list_frame, bg="#0f0f0f",
                                      highlightthickness=0, bd=0)
         self._btn_overlay.place(x=0, y=0, width=0, height=0)
 
@@ -759,8 +759,9 @@ class TrustTunnelWindow(tk.Tk):
         except Exception:
             cw = 640
 
-        # Column x positions (left edge of text)
-        col_x = [118, int(cw * 0.38), int(cw * 0.60), int(cw * 0.78)]
+        # Column x positions (left edge of text) — col_x[0] pushed right
+        # to avoid overlap with Connect/Disconnect button overlay (x=6..106)
+        col_x = [130, int(cw * 0.38), int(cw * 0.60), int(cw * 0.78)]
 
         for i, s in enumerate(self.servers):
             is_connected = (connected_name == s.name)
@@ -768,29 +769,29 @@ class TrustTunnelWindow(tk.Tk):
                        and connected_name == s.name)
             is_selected = (self._selected_index == i)
 
-            # Row background
+            # Row background — dark backgrounds for maximum text contrast
             if is_connected:
-                row_bg, text_fg = "#1a3a2a", SUCCESS_GREEN
+                row_bg, text_fg = "#0d2818", SUCCESS_GREEN
             elif is_busy:
-                row_bg, text_fg = "#2a2a1a", WARNING_YELLOW
+                row_bg, text_fg = "#1a1a0a", WARNING_YELLOW
             elif is_selected:
-                row_bg, text_fg = "#1e3a5f", "#80c8ff"
+                row_bg, text_fg = "#0d2848", "#80c8ff"
             else:
-                row_bg, text_fg = "#2d2d2d", "#ffffff"
+                row_bg, text_fg = "#0f0f0f", "#ffffff"
 
             y0 = i * self.ROW_H
             y1 = y0 + self.ROW_H
             c.create_rectangle(0, y0, cw, y1, fill=row_bg, outline="", tags="row")
 
             # Separator line
-            c.create_line(0, y1 - 1, cw, y1 - 1, fill="#3a3a3a", tags="row")
+            c.create_line(0, y1 - 1, cw, y1 - 1, fill="#1a1a1a", tags="row")
 
             addr = ",".join(s.endpoint.addresses) if s.endpoint.addresses else ""
             texts = [s.name, s.endpoint.hostname, addr, s.endpoint.username]
             for tx, label in zip(col_x, texts):
                 c.create_text(tx, y0 + self.ROW_H // 2, text=label,
                               fill=text_fg, anchor="w",
-                              font=("Helvetica", 11), tags="row")
+                              font=("Helvetica", 11, "bold"), tags="row")
             self._canvas_row_iids.append(i)
 
         total_h = len(self.servers) * self.ROW_H
