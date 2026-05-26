@@ -87,6 +87,22 @@ The installer:
 
 ---
 
+### Building from source
+
+If you want to build the app yourself:
+
+\`\`\`bash
+# 1. Install PyQt6 — MUST be 6.9.1 (6.10+ crashes on macOS with PyInstaller)
+pip3 install 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1' Pillow PyInstaller
+
+# 2. Clone and build
+git clone https://github.com/inhale/trusttunnel-macos.git
+cd trusttunnel-macos
+./build-app.sh
+\`\`\`
+
+---
+
 ### macOS says 'app is damaged' or 'may be malware'?
 
 macOS quarantines files downloaded through a browser. Fix it in Terminal:
