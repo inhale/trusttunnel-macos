@@ -350,20 +350,17 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                 echo "  Merging key dylibs (lipo per-dylib)..."
                 rm -rf dist/TrustTunnel.app/Contents/Frameworks
 
-                # Copy entire Frameworks from arm64 first (preserves bundle structure)
+                ARM_FW="dist_arm64/TrustTunnel.app/Contents/Frameworks"
+                X86_FW="dist_x86_64/TrustTunnel.app/Contents/Frameworks"
+                OUT_FW="dist/TrustTunnel.app/Contents/Frameworks"
+
+                # Copy Frameworks from arm64 (preserves Python.framework bundle structure for codesign)
+                # Then lipo-merge key dylibs that are arch-specific
                 cp -R "$ARM_FW" "$OUT_FW"
+                echo "  Copied Frameworks: $(ls "$OUT_FW" | tr '\n' ' ')"
 
-                # List of key dylibs to lipo-merge (arch-specific)
-                MERGE_LIBS=(
-                    "Python"
-                    "PyQt6/QtCore.abi3.so"
-                    "PyQt6/QtGui.abi3.so"
-                    "PyQt6/QtWidgets.abi3.so"
-                    "python3.11/Python"
-                    "python3.12/Python"
-                )
-
-                for lib in "${MERGE_LIBS[@]}"; do
+                # Lipo-merge key dylibs
+                for lib in "Python" "PyQt6/QtCore.abi3.so" "PyQt6/QtGui.abi3.so" "PyQt6/QtWidgets.abi3.so" "python3.11/Python" "python3.12/Python" "python3.13/Python"; do
                     arm_lib="$ARM_FW/$lib"
                     x86_lib="$X86_FW/$lib"
                     out_lib="$OUT_FW/$lib"
@@ -371,26 +368,7 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                         arm_arch=$(file "$arm_lib" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
                         x86_arch=$(file "$x86_lib" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
                         if [ "$arm_arch" != "$x86_arch" ]; then
-                            lipo -create "$arm_lib" "$x86_lib" -output "$out_lib" 2>/dev/null
-                            echo "    $lib: $arm_arch + $x86_arch -> merged"
-                        else
-                            echo "    $lib: both $arm_arch -> skipped"
-                        fi
-                    fi
-                done
-
-                # Also lipo-merge any .so or .dylib files in Frameworks that exist in both
-                echo "  Scanning for additional arch-specific dylibs..."
-                find "$ARM_FW" -name "*.so" -o -name "*.dylib" | while read -r arm_file; do
-                    rel="${arm_file#$ARM_FW/}"
-                    x86_file="$X86_FW/$rel"
-                    out_file="$OUT_FW/$rel"
-                    if [ -f "$x86_file" ] && [ ! -f "$out_file" ]; then
-                        arm_arch=$(file "$arm_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
-                        x86_arch=$(file "$x86_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
-                        if [ "$arm_arch" != "$x86_arch" ]; then
-                            lipo -create "$arm_file" "$x86_file" -output "$out_file" 2>/dev/null
-                            echo "    $rel: $arm_arch + $x86_arch -> merged"
+                            lipo -create "$arm_lib" "$x86_lib" -output "$out_lib" 2>/dev/null && echo "    $lib: $arm_arch + $x86_arch -> merged"
                         fi
                     fi
                 done
