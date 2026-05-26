@@ -364,12 +364,18 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                     arm_lib="$ARM_FW/$lib"
                     x86_lib="$X86_FW/$lib"
                     out_lib="$OUT_FW/$lib"
-                    if [ -f "$arm_lib" ] && [ -f "$x86_lib" ]; then
+                    arm_exists=$([ -f "$arm_lib" ] && echo "Y" || echo "N")
+                    x86_exists=$([ -f "$x86_lib" ] && echo "Y" || echo "N")
+                    if [ "$arm_exists" = "Y" ] && [ "$x86_exists" = "Y" ]; then
                         arm_arch=$(file "$arm_lib" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
                         x86_arch=$(file "$x86_lib" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
                         if [ "$arm_arch" != "$x86_arch" ]; then
                             lipo -create "$arm_lib" "$x86_lib" -output "$out_lib" 2>/dev/null && echo "    $lib: $arm_arch + $x86_arch -> merged"
+                        else
+                            echo "    $lib: both $arm_arch -> same arch, skipped"
                         fi
+                    else
+                        echo "    $lib: arm=$arm_exists x86=$x86_exists -> skipped (missing)"
                     fi
                 done
 
