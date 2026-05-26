@@ -22,7 +22,22 @@ Dark-themed, with server management, tray icon, and embedded console.
 
 - macOS 11 (Big Sur) or later
 - Python 3.11+ (Homebrew or MacPorts)
+- **PyQt6 < 6.10** (6.9.1 recommended — see note below)
 - **Sudo setup** (one-time, see below)
+
+### ⚠ PyQt6 version note
+
+**Do NOT use PyQt6 >= 6.10** with this app. Starting with PyQt6 6.10, Qt includes a
+`qdarwinpermissionplugin` whose C++ static initializer crashes on macOS when bundled
+with PyInstaller in `console=False` (windowed) mode. The crash occurs before any Python
+code runs (`CFBundleCopyBundleURL` in `QtCore.abi3.so` static init).
+
+If you already have PyQt6 >= 6.10 installed, `build-app.sh` will auto-downgrade to 6.9.1.
+Or manually:
+
+```bash
+pip install 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1'
+```
 
 ## Install Python
 
@@ -56,7 +71,7 @@ Build output: `dist/TrustTunnel.app` → installed to `/Applications/TrustTunnel
 ## Dev run (no build)
 
 ```bash
-pip install PyQt6 Pillow
+pip install 'PyQt6==6.9.1' Pillow
 python3 -m src
 ```
 

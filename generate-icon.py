@@ -63,7 +63,7 @@ def main():
         # Generate all required sizes
         # iconutil needs: 16x16, 32x32, 128x128, 256x256, 512x512
         # Plus @2x versions: icon_16x16@2x = 32x32, etc.
-        sizes = [16, 32, 128, 256, 512]
+        sizes = [16, 32, 64, 128, 256, 512]
         for s in sizes:
             create_icon(s, os.path.join(tmpdir, f'{s}x{s}.png'))
 

@@ -4,26 +4,23 @@ import os
 import sys
 import threading
 import time
-from typing import Optional, TYPE_CHECKING
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt6.QtGui import QFont, QColor, QIcon, QAction, QPixmap, QPainter, QPen
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
+    QLabel, QLineEdit, QTextEdit, QDialog, QFormLayout,
+    QTabWidget, QSplitter, QMessageBox, QAbstractItemView,
+    QFrame, QSizePolicy, QSpacerItem, QMenuBar, QMenu,
+    QStatusBar, QToolBar, QComboBox, QCheckBox, QSpinBox,
+    QSystemTrayIcon,
+)
 
 from .config import (
     ServerProfile, EndpointConfig,
     load_servers, save_servers, parse_deeplink,
 )
 from .client import ClientManager, ClientState, ClientStatus
-
-if TYPE_CHECKING:
-    from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
-    from PyQt6.QtGui import QFont, QColor, QIcon, QAction, QPixmap, QPainter, QPen
-    from PyQt6.QtWidgets import (
-        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-        QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
-        QLabel, QLineEdit, QTextEdit, QDialog, QFormLayout,
-        QTabWidget, QSplitter, QMessageBox, QAbstractItemView,
-        QFrame, QSizePolicy, QSpacerItem, QMenuBar, QMenu,
-        QStatusBar, QToolBar, QComboBox, QCheckBox, QSpinBox,
-        QSystemTrayIcon,
-    )
 
 
 # ── Dark palette ──────────────────────────────────────────────────────────

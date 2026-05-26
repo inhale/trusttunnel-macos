@@ -184,6 +184,41 @@ fi
 echo "Found: $PYTHON  ($PYTHON_OK)"
 echo ""
 
+# 1.5. Check PyQt6 version — >= 6.10 has qdarwinpermissionplugin which crashes
+#     with console=False on macOS (CFBundleCopyBundleURL in static initializer).
+#     Auto-downgrade to 6.9.1 which is the latest safe version.
+echo "=== Checking PyQt6 version compatibility ==="
+PYQT_VER=$("$PYTHON" -c "
+import importlib.metadata as m
+v = m.version('PyQt6')
+print(v)
+" 2>/dev/null)
+PYQT_MAJOR=$(echo "$PYQT_VER" | cut -d. -f1)
+PYQT_MINOR=$(echo "$PYQT_VER" | cut -d. -f2)
+if [ -n "$PYQT_MAJOR" ] && [ -n "$PYQT_MINOR" ]; then
+    if [ "$PYQT_MAJOR" -ge 6 ] && [ "$PYQT_MINOR" -ge 10 ]; then
+        echo ""
+        echo "  ⚠ PyQt6 $PYQT_VER detected — versions >= 6.10 crash on macOS"
+        echo "    with console=False due to qdarwinpermissionplugin static initializer."
+        echo "    Auto-downgrading to PyQt6 6.9.1 (latest safe version)..."
+        echo ""
+        "$PYTHON" -m pip install --quiet 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1' 'PyQt6-sip>=13.10' 2>&1
+        if [ $? -eq 0 ]; then
+            echo "  ✓ PyQt6 downgraded to 6.9.1"
+        else
+            echo "  ✗ Auto-downgrade failed — install manually:"
+            echo "    $PYTHON -m pip install 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1'"
+            echo ""
+            echo "  Or use console=True (shows a terminal window):"
+            echo "    Edit trusttunnel.spec: change console=False to console=True"
+            exit 1
+        fi
+    else
+        echo "  PyQt6 $PYQT_VER — OK (< 6.10, no qdarwinpermissionplugin)"
+    fi
+fi
+echo ""
+
 # 2. Install build dependencies
 echo "=== Checking build dependencies ==="
 
