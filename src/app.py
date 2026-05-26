@@ -6,6 +6,42 @@ import threading
 import time
 from typing import Optional
 
+# ── Version safety check ──────────────────────────────────────────────────
+# PyQt6 >= 6.10 has qdarwinpermissionplugin compiled into QtCore which crashes
+# with console=False on macOS (CFBundleCopyBundleURL in C++ static initializer).
+# Check BEFORE importing PyQt6 so we can show a clear error instead of a segfault.
+if sys.platform == "darwin":
+    try:
+        import importlib.metadata as _meta
+        _pyqt_ver = _meta.version("PyQt6")
+        _pyqt_minor = int(_pyqt_ver.split(".")[1])
+        if _pyqt_minor >= 10:
+            # Try to show a GUI error; fall back to stderr
+            try:
+                import subprocess
+                subprocess.run([
+                    "osascript", "-e",
+                    'display dialog "TrustTunnel requires PyQt6 < 6.10.\n'
+                    'Current version: '
+                    + _pyqt_ver
+                    + '\n\nFix: pip3 install PyQt6==6.9.1 PyQt6-Qt6==6.9.1\n'
+                    'Then rebuild: ./build-app.sh" '
+                    'with title "TrustTunnel — PyQt6 Version Error" '
+                    'buttons {"OK"} default button "OK" '
+                    'with icon stop'
+                ], capture_output=True, timeout=10)
+            except Exception:
+                print(
+                    f"\n❌ FATAL: PyQt6 {_pyqt_ver} detected.\n"
+                    f"   Versions >= 6.10 crash on macOS with console=False.\n"
+                    f"   Fix: pip3 install 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1'\n"
+                    f"   Then rebuild: ./build-app.sh\n",
+                    file=sys.stderr,
+                )
+            sys.exit(1)
+    except Exception:
+        pass  # Can't determine version — proceed and hope for the best
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QFont, QColor, QIcon, QAction, QPixmap, QPainter, QPen
 from PyQt6.QtWidgets import (

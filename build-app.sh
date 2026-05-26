@@ -204,7 +204,19 @@ if [ -n "$PYQT_MAJOR" ] && [ -n "$PYQT_MINOR" ]; then
         echo ""
         "$PYTHON" -m pip install --quiet 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1' 'PyQt6-sip>=13.10' 2>&1
         if [ $? -eq 0 ]; then
-            echo "  ✓ PyQt6 downgraded to 6.9.1"
+            # Verify the downgrade actually took effect
+            VERIFIED_VER=$("$PYTHON" -c "
+import importlib.metadata as m
+print(m.version('PyQt6'))
+" 2>/dev/null)
+            VERIFIED_MINOR=$(echo "$VERIFIED_VER" | cut -d. -f2)
+            if [ -n "$VERIFIED_MINOR" ] && [ "$VERIFIED_MINOR" -lt 10 ] 2>/dev/null; then
+                echo "  ✓ PyQt6 downgraded to $VERIFIED_VER (verified)"
+            else
+                echo "  ✗ Downgrade reported success but PyQt6 is still $VERIFIED_VER"
+                echo "    Try: $PYTHON -m pip install --force-reinstall 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1'"
+                exit 1
+            fi
         else
             echo "  ✗ Auto-downgrade failed — install manually:"
             echo "    $PYTHON -m pip install 'PyQt6==6.9.1' 'PyQt6-Qt6==6.9.1'"
@@ -216,6 +228,8 @@ if [ -n "$PYQT_MAJOR" ] && [ -n "$PYQT_MINOR" ]; then
     else
         echo "  PyQt6 $PYQT_VER — OK (< 6.10, no qdarwinpermissionplugin)"
     fi
+else
+    echo "  ⚠ Could not determine PyQt6 version — assuming OK"
 fi
 echo ""
 
