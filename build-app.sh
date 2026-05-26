@@ -258,11 +258,16 @@ if [ -d "$APP" ]; then
     rm -rf /Applications/TrustTunnel.app
     cp -R "$APP" /Applications/
     echo "  -> /Applications/TrustTunnel.app"
-
+    # Auto-configure sudo (always run to ensure correct binary path)
     echo ""
     echo "  Configuring passwordless sudo for VPN client..."
     "$SCRIPT_DIR/setup-sudo.sh"
 
+    echo ""
+    echo "✓ Installed: /Applications/TrustTunnel.app"
+    echo ""
+    echo "To debug crashes, run:"
+    echo "  QT_DEBUG_PLUGINS=1 /Applications/TrustTunnel.app/Contents/MacOS/TrustTunnel 2>&1 | head -50"
     echo ""
     echo "To share: zip -r TrustTunnel-macOS.zip \"$APP\""
 else

@@ -3,6 +3,7 @@
 import os
 import sys
 import threading
+import time
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QSize
@@ -778,7 +779,33 @@ class TrustTunnelWindow(QMainWindow):
 
 
 # ── Entry point ───────────────────────────────────────────────────────────
+def _excepthook(exc_type, exc_val, exc_tb):
+    """Write uncaught exceptions to a log file for debugging."""
+    import traceback
+    log_path = os.path.expanduser("~/Library/Logs/TrustTunnel-crash.log")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, "a") as f:
+        f.write("=" * 60 + "\n")
+        f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "\n")
+        traceback.print_exception(exc_type, exc_val, exc_tb, file=f)
+        f.write("\n")
+    # Also print to stderr
+    traceback.print_exception(exc_type, exc_val, exc_tb)
+
+sys.excepthook = _excepthook
+
 def main():
+    # Debug: enable Qt plugin diagnostics (remove after fixing)
+    # os.environ['QT_DEBUG_PLUGINS'] = '1'
+
+    # Ensure Qt platform plugins can be found in the bundle
+    if getattr(sys, 'frozen', False):
+        plugin_path = os.path.join(sys._MEIPASS, 'PyQt6', 'Qt6', 'plugins')
+        if not os.path.isdir(plugin_path):
+            plugin_path = os.path.join(sys._MEIPASS, 'PyQt6', 'plugins')
+        if os.path.isdir(plugin_path):
+            os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = plugin_path
+
     app = QApplication(sys.argv)
     app.setPalette(_dark_palette())
     app.setStyle("Fusion")
@@ -803,6 +830,14 @@ def main():
         QLabel { color: #d4d4d4; }
         QStatusBar { background: #252525; }
     """)
+
+    # Ensure Qt platform plugins can be found in the bundle
+    if getattr(sys, 'frozen', False):
+        plugin_path = os.path.join(sys._MEIPASS, 'PyQt6', 'Qt6', 'plugins')
+        if not os.path.isdir(plugin_path):
+            plugin_path = os.path.join(sys._MEIPASS, 'PyQt6', 'plugins')
+        if os.path.isdir(plugin_path):
+            os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = plugin_path
 
     window = TrustTunnelWindow()
     window.show()
