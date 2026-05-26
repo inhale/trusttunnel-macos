@@ -64,15 +64,16 @@ from .client import ClientManager, ClientState, ClientStatus
 # ── Dark palette ──────────────────────────────────────────────────────────
 def _dark_palette():
     from PyQt6.QtGui import QPalette, QColor
+    # Base dark level: ~30% lighter than before (was ~20% black, now ~30% black)
     p = QPalette()
-    p.setColor(QPalette.ColorRole.Window, QColor(60, 60, 60))
+    p.setColor(QPalette.ColorRole.Window, QColor(78, 78, 78))
     p.setColor(QPalette.ColorRole.WindowText, QColor(220, 220, 220))
-    p.setColor(QPalette.ColorRole.Base, QColor(50, 50, 50))
-    p.setColor(QPalette.ColorRole.AlternateBase, QColor(70, 70, 70))
-    p.setColor(QPalette.ColorRole.ToolTipBase, QColor(55, 55, 55))
+    p.setColor(QPalette.ColorRole.Base, QColor(65, 65, 65))
+    p.setColor(QPalette.ColorRole.AlternateBase, QColor(88, 88, 88))
+    p.setColor(QPalette.ColorRole.ToolTipBase, QColor(72, 72, 72))
     p.setColor(QPalette.ColorRole.ToolTipText, QColor(220, 220, 220))
     p.setColor(QPalette.ColorRole.Text, QColor(220, 220, 220))
-    p.setColor(QPalette.ColorRole.Button, QColor(78, 78, 78))
+    p.setColor(QPalette.ColorRole.Button, QColor(96, 96, 96))
     p.setColor(QPalette.ColorRole.ButtonText, QColor(220, 220, 220))
     p.setColor(QPalette.ColorRole.BrightText, QColor(255, 128, 128))
     p.setColor(QPalette.ColorRole.Highlight, QColor(0, 120, 212))
@@ -339,9 +340,41 @@ class TrustTunnelWindow:
         # Title bar
         title_bar = QHBoxLayout()
         title_bar.setContentsMargins(8, 4, 8, 4)
+
+        # App icon
+        app_icon = QIcon()
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "icon.icns")
+        if not os.path.exists(icon_path):
+            icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Resources", "icon.icns")
+        if os.path.exists(icon_path):
+            app_icon = QIcon(icon_path)
+        else:
+            # Fallback: generate a small shield icon programmatically
+            pm = QPixmap(24, 24)
+            pm.fill(QColor(0, 0, 0, 0))
+            painter = QPainter(pm)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(QPen(QColor(78, 201, 176), 2))
+            painter.setBrush(QColor(40, 40, 40))
+            painter.drawRoundedRect(2, 2, 20, 20, 4, 4)
+            painter.setPen(QPen(QColor(78, 201, 176), 1.5))
+            painter.drawLine(12, 7, 12, 15)
+            painter.drawLine(8, 11, 16, 11)
+            painter.end()
+            app_icon = QIcon(pm)
+
+        icon_label = QLabel()
+        icon_label.setPixmap(app_icon.pixmap(24, 24))
+        icon_label.setFixedSize(24, 24)
+        title_bar.addWidget(icon_label)
+
         title_label = QLabel("TrustTunnel VPN")
-        title_label.setFont(QFont("Helvetica", 36, QFont.Weight.Bold))
+        title_label.setFont(QFont("Helvetica", 18, QFont.Weight.Bold))
         title_bar.addWidget(title_label)
+
+        # Spacer before status
+        title_bar.addSpacing(50)
+
         self._status_dot = QLabel("●")
         self._status_dot.setStyleSheet("color: #666; font-size: 13px;")
         title_bar.addWidget(self._status_dot)
@@ -467,11 +500,11 @@ class TrustTunnelWindow:
                        and connected_name == s.name)
 
             if is_connected:
-                row_bg, text_fg = QColor(13, 40, 24), QColor(78, 201, 176)
+                row_bg, text_fg = QColor(18, 55, 32), QColor(78, 201, 176)
             elif is_busy:
-                row_bg, text_fg = QColor(42, 42, 26), QColor(204, 167, 0)
+                row_bg, text_fg = QColor(55, 55, 34), QColor(204, 167, 0)
             else:
-                row_bg, text_fg = QColor(26, 26, 26), QColor(255, 255, 255)
+                row_bg, text_fg = QColor(34, 34, 34), QColor(255, 255, 255)
 
             name_item = QTableWidgetItem(s.name)
             name_item.setForeground(text_fg)
@@ -958,23 +991,23 @@ def main():
     app.setStyle("Fusion")
 
     app.setStyleSheet("""
-        QMainWindow { background: #1e1e1e; }
-        QWidget { background: #1e1e1e; color: #d4d4d4; }
+        QMainWindow { background: #2c2c2c; }
+        QWidget { background: #2c2c2c; color: #d4d4d4; }
         QTabWidget::pane { border: none; }
-        QTabBar::tab { background: #2a2a2a; color: #d4d4d4; padding: 6px 16px; }
-        QTabBar::tab:selected { background: #1e1e1e; }
-        QTableWidget { background: #1a1a1a; border: none; gridline-color: #2a2a2a; }
+        QTabBar::tab { background: #383838; color: #d4d4d4; padding: 6px 16px; }
+        QTabBar::tab:selected { background: #2c2c2c; }
+        QTableWidget { background: #262626; border: none; gridline-color: #383838; }
         QTableWidget::item { padding: 4px; }
         QTableWidget::item:selected { background: #0078d4; color: white; }
-        QHeaderView::section { background: #3a3a3a; color: #d4d4d4; border: none; padding: 4px 8px; font-weight: bold; }
-        QTextEdit { background: #0d0d0d; color: #a0a0a0; border: none; }
-        QLineEdit { background: #1a1a1a; color: #e0e0e0; border: 1px solid #3a3a3a; padding: 4px; }
-        QPushButton { background: #3a3a3a; color: #d4d4d4; border: none; padding: 4px 12px; }
-        QPushButton:hover { background: #4a4a4a; }
-        QPushButton:pressed { background: #2a2a2a; }
-        QDialog { background: #252525; }
+        QHeaderView::section { background: #444; color: #d4d4d4; border: none; padding: 4px 8px; font-weight: bold; }
+        QTextEdit { background: #1f1f1f; color: #a0a0a0; border: none; }
+        QLineEdit { background: #262626; color: #e0e0e0; border: 1px solid #444; padding: 4px; }
+        QPushButton { background: #444; color: #d4d4d4; border: none; padding: 4px 12px; }
+        QPushButton:hover { background: #505050; }
+        QPushButton:pressed { background: #383838; }
+        QDialog { background: #303030; }
         QLabel { color: #d4d4d4; }
-        QStatusBar { background: #252525; }
+        QStatusBar { background: #303030; }
     """)
 
     window = TrustTunnelWindow(app)
