@@ -343,7 +343,6 @@ class TrustTunnelWindow:
 
         # App icon
         app_icon = QIcon()
-        # Try multiple paths: bundle Resources, MEIPASS, dev layout
         icon_candidates = []
         if getattr(sys, 'frozen', False):
             meipass = getattr(sys, '_MEIPASS', '')
@@ -352,7 +351,6 @@ class TrustTunnelWindow:
                 os.path.join(meipass, '..', 'Resources', 'icon.icns'),
                 os.path.join(meipass, 'Resources', 'icon.icns'),
             ])
-        # Dev / source layout
         icon_candidates.extend([
             os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'icon.icns'),
             os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'icon.icns'),
@@ -362,18 +360,9 @@ class TrustTunnelWindow:
                 app_icon = QIcon(cand)
                 break
         if app_icon.isNull():
-            # Fallback: generate a small shield icon programmatically
+            # Fallback: simple colored square (no QPainter to avoid Rosetta issues)
             pm = QPixmap(24, 24)
-            pm.fill(QColor(0, 0, 0, 0))
-            painter = QPainter(pm)
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setPen(QPen(QColor(78, 201, 176), 2))
-            painter.setBrush(QColor(40, 40, 40))
-            painter.drawRoundedRect(2, 2, 20, 20, 4, 4)
-            painter.setPen(QPen(QColor(78, 201, 176), 1.5))
-            painter.drawLine(12, 7, 12, 15)
-            painter.drawLine(8, 11, 16, 11)
-            painter.end()
+            pm.fill(QColor(78, 201, 176))
             app_icon = QIcon(pm)
 
         icon_label = QLabel()
@@ -494,6 +483,45 @@ class TrustTunnelWindow:
 
     # ── Server list ──────────────────────────────────────────────────────
 
+    _pencil_icon = None
+    _trash_icon = None
+
+    @classmethod
+    def _get_pencil_icon(cls):
+        if cls._pencil_icon is None:
+            from PyQt6.QtGui import QPainter, QPen, QColor, QPixmap
+            pm = QPixmap(20, 20)
+            pm.fill(QColor(0, 0, 0, 0))
+            painter = QPainter(pm)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen = QPen(QColor("#aaa"), 1)
+            painter.setPen(pen)
+            painter.drawLine(3, 17, 17, 3)
+            painter.drawLine(17, 3, 19, 1)
+            painter.drawLine(3, 17, 1, 19)
+            painter.end()
+            cls._pencil_icon = QIcon(pm)
+        return cls._pencil_icon
+
+    @classmethod
+    def _get_trash_icon(cls):
+        if cls._trash_icon is None:
+            from PyQt6.QtGui import QPainter, QPen, QColor, QPixmap
+            pm = QPixmap(20, 20)
+            pm.fill(QColor(0, 0, 0, 0))
+            painter = QPainter(pm)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            pen = QPen(QColor("#c44"), 1)
+            painter.setPen(pen)
+            painter.drawRect(4, 6, 12, 12)
+            painter.drawLine(3, 6, 17, 6)
+            painter.drawLine(7, 3, 13, 3)
+            painter.drawLine(7, 3, 7, 6)
+            painter.drawLine(13, 3, 13, 6)
+            painter.end()
+            cls._trash_icon = QIcon(pm)
+        return cls._trash_icon
+
     def _refresh_server_list(self):
         from PyQt6.QtGui import QFont, QColor
         from PyQt6.QtWidgets import QTableWidgetItem
@@ -578,45 +606,8 @@ class TrustTunnelWindow:
 
             from PyQt6.QtGui import QPainter, QPen, QColor, QIcon, QPixmap
 
-            def _make_icon(draw_fn, size=20):
-                pm = QPixmap(size, size)
-                pm.fill(QColor(0, 0, 0, 0))
-                painter = QPainter(pm)
-                painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-                draw_fn(painter, size)
-                painter.end()
-                return QIcon(pm)
-
-            def _draw_pencil(painter, size):
-                m = max(3, size // 5)
-                pen = QPen(QColor("#aaa"), max(1, size // 10))
-                painter.setPen(pen)
-                # pencil body (diagonal)
-                painter.drawLine(m, size - m, size - m, m)
-                # tip
-                painter.drawLine(size - m, m, size - m + 2, m - 2)
-                # eraser end
-                painter.drawLine(m, size - m, m - 2, size - m + 2)
-
-            def _draw_trash(painter, size):
-                m = max(3, size // 5)
-                pen = QPen(QColor("#c44"), max(1, size // 10))
-                painter.setPen(pen)
-                # bin body
-                painter.drawRect(m, m + 2, size - 2*m, size - 2*m - 2)
-                # lid
-                painter.drawLine(m - 1, m + 2, size - m + 1, m + 2)
-                # handle
-                painter.drawLine(size//2 - 2, m - 1, size//2 + 2, m - 1)
-                painter.drawLine(size//2, m - 1, size//2, m + 2)
-                # lines inside
-                x1 = m + (size - 2*m) // 3
-                x2 = m + 2*(size - 2*m) // 3
-                painter.drawLine(x1, m + 5, x1, size - m - 3)
-                painter.drawLine(x2, m + 5, x2, size - m - 3)
-
-            pencil_icon = _make_icon(_draw_pencil)
-            trash_icon = _make_icon(_draw_trash)
+            pencil_icon = TrustTunnelWindow._get_pencil_icon()
+            trash_icon = TrustTunnelWindow._get_trash_icon()
 
             edit_btn = QPushButton(pencil_icon, "")
             edit_btn.setFixedSize(30, 28)
