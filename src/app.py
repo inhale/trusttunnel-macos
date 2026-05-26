@@ -6,7 +6,7 @@ import threading
 from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QSize
-from PyQt6.QtGui import QFont, QColor, QIcon, QAction
+from PyQt6.QtGui import QFont, QColor, QIcon, QAction, QPixmap, QPainter, QPen
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
@@ -201,33 +201,18 @@ class TrustTunnelWindow(QMainWindow):
         self._build()
         self._refresh_server_list()
 
-        # Tray icon
+        # Tray icon — created with placeholder, updated by _update_tray_icon
         self._tray_icon = QSystemTrayIcon(self)
-        # Use a simple icon — try to load from resources, fallback to null
-        _tray_icon_path = os.path.join(os.path.dirname(__file__), '..', 'icon.png')
-        if os.path.exists(_tray_icon_path):
-            self._tray_icon.setIcon(QIcon(_tray_icon_path))
-        else:
-            # Use a 16x16 blue square as fallback
-            from PyQt6.QtGui import QPixmap
-            pm = QPixmap(16, 16)
-            pm.fill(QColor(37, 99, 235))
-            self._tray_icon.setIcon(QIcon(pm))
-        self._tray_icon.setToolTip("TrustTunnel VPN")
-
-        # Tray menu
-        tray_menu = QMenu()
-        show_action = QAction("Show", self)
-        show_action.triggered.connect(self.show)
-        show_action.triggered.connect(self.raise_)
-        tray_menu.addAction(show_action)
-        tray_menu.addSeparator()
-        quit_action = QAction("Quit", self)
-        quit_action.triggered.connect(self._quit)
-        tray_menu.addAction(quit_action)
-        self._tray_icon.setContextMenu(tray_menu)
+        self._tray_icon.setToolTip("TrustTunnel VPN — Disconnected")
+        self._tray_menu = QMenu()
+        self._tray_icon.setContextMenu(self._tray_menu)
         self._tray_icon.activated.connect(self._tray_activated)
+        self._update_tray_icon(ClientState.DISCONNECTED)
         self._tray_icon.show()
+
+        # Store per-server action references for enable/disable
+        self._tray_server_actions: list[tuple[QAction, int]] = []
+        self._rebuild_tray_menu()
 
         # Poll timer
         self._poll_timer = QTimer(self)
@@ -471,6 +456,8 @@ class TrustTunnelWindow(QMainWindow):
         if self._selected_index is not None and self._selected_index < len(self.servers):
             self._table.selectRow(self._selected_index)
 
+        self._rebuild_tray_menu()
+
     def _on_selection_changed(self):
         selected = self._table.selectedItems()
         if selected:
@@ -641,6 +628,7 @@ class TrustTunnelWindow(QMainWindow):
         if state != self._last_state:
             self._last_state = state
             self._refresh_server_list()
+            self._update_tray_icon(state)
 
     def _on_status_changed(self, status):
         self._refresh_server_list()
@@ -661,6 +649,113 @@ class TrustTunnelWindow(QMainWindow):
         self.client.disconnect()
         self._tray_icon.hide()
         QApplication.quit()
+
+    def _update_tray_icon(self, state: ClientState):
+        """Update tray icon color and tooltip based on connection state."""
+        # 16x16 icon with a shield/tunnel shape
+        pm = QPixmap(16, 16)
+        pm.fill(Qt.GlobalColor.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if state == ClientState.CONNECTED:
+            color = QColor(78, 201, 176)  # green
+        elif state in (ClientState.CONNECTING, ClientState.CHECKING):
+            color = QColor(204, 167, 0)   # yellow
+        elif state == ClientState.ERROR:
+            color = QColor(244, 71, 71)   # red
+        else:
+            color = QColor(102, 102, 102) # grey
+
+        # Draw a rounded rect "shield" icon
+        p.setPen(QPen(color, 1))
+        p.setBrush(color)
+        p.drawRoundedRect(2, 1, 12, 14, 2, 2)
+        # Draw a small "tunnel" hole
+        p.setPen(QPen(QColor(30, 30, 30), 1))
+        p.setBrush(QColor(30, 30, 30))
+        p.drawEllipse(5, 5, 6, 6)
+        p.end()
+
+        icon = QIcon(pm)
+        self._tray_icon.setIcon(icon)
+
+        labels = {
+            ClientState.DISCONNECTED: "Disconnected",
+            ClientState.CHECKING: "Checking...",
+            ClientState.CONNECTING: f"Connecting to {self.client.status.server_name}",
+            ClientState.CONNECTED: f"Connected — {self.client.status.server_name}",
+            ClientState.ERROR: f"Error — {self.client.status.server_name}",
+        }
+        self._tray_icon.setToolTip(f"TrustTunnel VPN — {labels.get(state, 'Unknown')}")
+
+    def _rebuild_tray_menu(self):
+        """Rebuild the tray context menu with server list."""
+        self._tray_menu.clear()
+        self._tray_server_actions.clear()
+
+        connected_name = (
+            self.client.status.server_name if self.client.is_connected() else None
+        )
+
+        # Server entries
+        for i, profile in enumerate(self.servers):
+            action = QAction(profile.name, self)
+            if profile.name == connected_name:
+                action.setCheckable(True)
+                action.setChecked(True)
+            action.triggered.connect(lambda checked, idx=i: self._tray_toggle(idx))
+            self._tray_menu.addAction(action)
+            self._tray_server_actions.append((action, i))
+
+        if self.servers:
+            self._tray_menu.addSeparator()
+
+        # Add Server
+        add_action = QAction("+ Add Server", self)
+        add_action.triggered.connect(self._add_server_from_tray)
+        self._tray_menu.addAction(add_action)
+
+        # Import tt://
+        import_action = QAction("Import tt://", self)
+        import_action.triggered.connect(self._import_from_tray)
+        self._tray_menu.addAction(import_action)
+
+        self._tray_menu.addSeparator()
+
+        # Show
+        show_action = QAction("Show Window", self)
+        show_action.triggered.connect(self._show_from_tray)
+        self._tray_menu.addAction(show_action)
+
+        # Quit
+        quit_action = QAction("Quit", self)
+        quit_action.triggered.connect(self._quit)
+        self._tray_menu.addAction(quit_action)
+
+    def _tray_toggle(self, idx: int):
+        """Toggle connection for a server from tray menu."""
+        self._toggle_connection(idx)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _add_server_from_tray(self):
+        self._add_server()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _import_from_tray(self):
+        self._import_deeplink()
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _show_from_tray(self):
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
     def closeEvent(self, event):
         if self._quitting:

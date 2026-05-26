@@ -222,42 +222,11 @@ fi
 if [ ! -f "icon.icns" ]; then
     echo ""
     echo "=== Generating icon ==="
-
-    "$PYTHON" -c "
-import struct, zlib
-SZ = 512
-raw = b''
-for y in range(SZ):
-    raw += b'\x00'
-    for x in range(SZ):
-        raw += struct.pack('BBBB', 37, 99, 235, 255)
-sig = b'\x89PNG\r\n\x1a\n'
-ihdr = struct.pack('>IIBBBBB', SZ, SZ, 8, 6, 0, 0, 0)
-def chunk(t, d):
-    return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
-png = sig + chunk(b'IHDR', ihdr) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
-with open('icon.png', 'wb') as f: f.write(png)
-"
-    echo "  icon.png created"
-
-    if command -v iconutil >/dev/null 2>&1 && command -v sips >/dev/null 2>&1; then
-        echo "  Converting to .icns..."
-        mkdir -p icon.iconset
-        sips -z 16 16   icon.png --out icon.iconset/icon_16x16.png 2>/dev/null
-        sips -z 32 32   icon.png --out icon.iconset/icon_16x16@2x.png 2>/dev/null
-        sips -z 32 32   icon.png --out icon.iconset/icon_32x32.png 2>/dev/null
-        sips -z 64 64   icon.png --out icon.iconset/icon_32x32@2x.png 2>/dev/null
-        sips -z 128 128 icon.png --out icon.iconset/icon_128x128.png 2>/dev/null
-        sips -z 256 256 icon.png --out icon.iconset/icon_128x128@2x.png 2>/dev/null
-        sips -z 256 256 icon.png --out icon.iconset/icon_256x256.png 2>/dev/null
-        sips -z 512 512 icon.png --out icon.iconset/icon_256x256@2x.png 2>/dev/null
-        sips -z 512 512 icon.png --out icon.iconset/icon_512x512.png 2>/dev/null
-        sips -z 1024 1024 icon.png --out icon.iconset/icon_512x512@2x.png 2>/dev/null
-        iconutil -c icns icon.iconset -o icon.icns 2>/dev/null
-        rm -rf icon.iconset
-        echo "  icon.icns created"
+    if [ -f "generate-icon.py" ]; then
+        "$PYTHON" generate-icon.py icon.icns
+        echo "  icon.icns created (shield icon via generate-icon.py)"
     else
-        echo "  Note: iconutil/sips not available, using PNG icon"
+        echo "  generate-icon.py not found, skipping icon generation"
     fi
 fi
 

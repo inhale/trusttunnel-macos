@@ -95,7 +95,7 @@ class ServerProfile:
             "killswitch_allow_ports": self.killswitch_allow_ports,
             "post_quantum_group_enabled": self.post_quantum_group_enabled,
             "exclusions": self.exclusions,
-            "dns_upstreams": self.endpoint.dns_upstreams,
+            "dns_upstreams": self.endpoint.dns_upstreams or ["1.1.1.1", "8.8.8.8"],
         }
         cfg["endpoint"] = {
             "hostname": self.endpoint.hostname,
