@@ -344,6 +344,10 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                 lipo -create "$ARM_OUTPUT" "$X86_OUTPUT" \
                     -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel
 
+                # Copy Info.plist from arm64 build (contains LSUIElement, console=True settings)
+                cp dist_arm64/TrustTunnel.app/Contents/Info.plist \
+                   dist/TrustTunnel.app/Contents/Info.plist
+
                 # Merge Frameworks — lipo only the key dylibs that differ by arch
                 # Framework bundles (Python.framework, Qt*.framework) must stay intact
                 # for codesign to work. Only merge the specific dylib inside them.
