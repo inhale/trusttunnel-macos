@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QSplitter, QMessageBox, QAbstractItemView,
     QFrame, QSizePolicy, QSpacerItem, QMenuBar, QMenu,
     QStatusBar, QToolBar, QComboBox, QCheckBox, QSpinBox,
+    QSystemTrayIcon,
 )
 
 from .config import (
@@ -163,7 +164,7 @@ class ImportDialog(QDialog):
         import_btn.clicked.connect(self._do_import)
         btn_row.addWidget(cancel_btn)
         btn_row.addWidget(import_btn)
-        layout.addRow(btn_row)
+        layout.addLayout(btn_row)
 
     def _do_import(self):
         uri = self._text.toPlainText().strip()
@@ -200,10 +201,40 @@ class TrustTunnelWindow(QMainWindow):
         self._build()
         self._refresh_server_list()
 
+        # Tray icon
+        self._tray_icon = QSystemTrayIcon(self)
+        # Use a simple icon — try to load from resources, fallback to null
+        _tray_icon_path = os.path.join(os.path.dirname(__file__), '..', 'icon.png')
+        if os.path.exists(_tray_icon_path):
+            self._tray_icon.setIcon(QIcon(_tray_icon_path))
+        else:
+            # Use a 16x16 blue square as fallback
+            from PyQt6.QtGui import QPixmap
+            pm = QPixmap(16, 16)
+            pm.fill(QColor(37, 99, 235))
+            self._tray_icon.setIcon(QIcon(pm))
+        self._tray_icon.setToolTip("TrustTunnel VPN")
+
+        # Tray menu
+        tray_menu = QMenu()
+        show_action = QAction("Show", self)
+        show_action.triggered.connect(self.show)
+        show_action.triggered.connect(self.raise_)
+        tray_menu.addAction(show_action)
+        tray_menu.addSeparator()
+        quit_action = QAction("Quit", self)
+        quit_action.triggered.connect(self._quit)
+        tray_menu.addAction(quit_action)
+        self._tray_icon.setContextMenu(tray_menu)
+        self._tray_icon.activated.connect(self._tray_activated)
+        self._tray_icon.show()
+
         # Poll timer
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._poll_status)
         self._poll_timer.start(300)
+
+        self._quitting = False
 
     # ── Build UI ──────────────────────────────────────────────────────
 
@@ -619,7 +650,22 @@ class TrustTunnelWindow(QMainWindow):
 
     # ── Close ─────────────────────────────────────────────────────────
 
+    def _tray_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+
+    def _quit(self):
+        self._quitting = True
+        self.client.disconnect()
+        self._tray_icon.hide()
+        QApplication.quit()
+
     def closeEvent(self, event):
+        if self._quitting:
+            event.accept()
+            return
         if self.client.is_connected():
             reply = QMessageBox.question(
                 self, "Quit", "Disconnect and quit?",
@@ -629,7 +675,14 @@ class TrustTunnelWindow(QMainWindow):
                 event.ignore()
                 return
             self.client.disconnect()
-        event.accept()
+            self._quitting = True
+            self._tray_icon.hide()
+            event.accept()
+            return
+        # Not connected — minimize to tray
+        event.ignore()
+        self.hide()
+        self._tray_icon.show()
 
 
 # ── Entry point ───────────────────────────────────────────────────────────
