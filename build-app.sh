@@ -308,30 +308,38 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         echo "  Building universal2 (arm64 + x86_64)..."
         ARM_PYTHON="$PYTHON"
 
-        # Build arm64 version
-        echo "  [1/3] Building arm64..."
-        "$ARM_PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm --distpath dist_arm64 2>&1
+        # Check x86_64 Python has PyInstaller
+        if ! "$X86_PYTHON" -c "import PyInstaller" 2>/dev/null; then
+            echo "  ✗ x86_64 Python missing PyInstaller. Install it:"
+            echo "    $X86_PYTHON -m pip install pyinstaller"
+            echo "  Falling back to arm64 only."
+            "$ARM_PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm 2>&1
+        else
+            # Build arm64 version
+            echo "  [1/3] Building arm64..."
+            "$ARM_PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm --distpath dist_arm64 2>&1
 
-        # Build x86_64 version
-        echo "  [2/3] Building x86_64..."
-        arch -x86_64 "$X86_PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm --distpath dist_x86_64 2>&1
+            # Build x86_64 version
+            echo "  [2/3] Building x86_64..."
+            arch -x86_64 "$X86_PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm --distpath dist_x86_64 2>&1
 
-        # Merge with lipo
-        echo "  [3/3] Merging with lipo..."
-        mkdir -p dist/TrustTunnel.app/Contents/MacOS
-        lipo -create \
-            dist_arm64/TrustTunnel.app/Contents/MacOS/TrustTunnel \
-            dist_x86_64/TrustTunnel.app/Contents/MacOS/TrustTunnel \
-            -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel
-
-        # Copy resources from arm64 build (they're the same)
-        cp -R dist_arm64/TrustTunnel.app/Contents/Frameworks dist/TrustTunnel.app/Contents/
-        cp -R dist_arm64/TrustTunnel.app/Contents/Resources dist/TrustTunnel.app/Contents/
-
-        # Cleanup temp dirs
-        rm -rf dist_arm64 dist_x86_64
-
-        echo "  ✓ Universal2 binary created"
+            # Merge with lipo
+            echo "  [3/3] Merging with lipo..."
+            if [ -f "dist_x86_64/TrustTunnel.app/Contents/MacOS/TrustTunnel" ]; then
+                mkdir -p dist/TrustTunnel.app/Contents/MacOS
+                lipo -create \
+                    dist_arm64/TrustTunnel.app/Contents/MacOS/TrustTunnel \
+                    dist_x86_64/TrustTunnel.app/Contents/MacOS/TrustTunnel \
+                    -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel
+                cp -R dist_arm64/TrustTunnel.app/Contents/Frameworks dist/TrustTunnel.app/Contents/
+                cp -R dist_arm64/TrustTunnel.app/Contents/Resources dist/TrustTunnel.app/Contents/
+                echo "  ✓ Universal2 binary created"
+            else
+                echo "  ✗ x86_64 build failed. Using arm64 only."
+                cp -R dist_arm64/TrustTunnel.app dist/TrustTunnel.app
+            fi
+            rm -rf dist_arm64 dist_x86_64
+        fi
     else
         echo "  No x86_64 Python found — building arm64 only"
         "$PYTHON" -m PyInstaller trusttunnel.spec --clean --noconfirm 2>&1
