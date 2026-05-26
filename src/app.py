@@ -199,7 +199,6 @@ class TrustTunnelWindow(QMainWindow):
         self._bridge.log_line.connect(self._on_log_line)
 
         self._build()
-        self._refresh_server_list()
 
         # Tray icon — created with placeholder, updated by _update_tray_icon
         self._tray_icon = QSystemTrayIcon(self)
@@ -212,7 +211,9 @@ class TrustTunnelWindow(QMainWindow):
 
         # Store per-server action references for enable/disable
         self._tray_server_actions: list[tuple[QAction, int]] = []
-        self._rebuild_tray_menu()
+
+        # Now refresh server list (which also rebuilds tray menu)
+        self._refresh_server_list()
 
         # Poll timer
         self._poll_timer = QTimer(self)
