@@ -511,20 +511,6 @@ class TrustTunnelWindow(tk.Tk):
                                      fg="#888", font=("Helvetica", 10))
         self._status_text.pack(side="left", padx=4)
 
-        # ── Servers button bar — packed LAST at bottom so PanedWindow
-        #    can never cover it regardless of sash position ──
-        servers_btn_bar = tk.Frame(self, bg=BG)
-        servers_btn_bar.pack(side="bottom", fill="x", padx=8, pady=(0, 4))
-
-        _make_button(servers_btn_bar, text="+ Add",       command=self._add_server,
-                     style="Dark.TButton").pack(side="left", padx=1)
-        _make_button(servers_btn_bar, text="Edit",        command=self._edit_server,
-                     style="Dark.TButton").pack(side="left", padx=1)
-        _make_button(servers_btn_bar, text="Delete",      command=self._delete_server,
-                     style="Dark.TButton").pack(side="left", padx=1)
-        _make_button(servers_btn_bar, text="Import Link", command=self._import_deeplink,
-                     style="Dark.TButton").pack(side="left", padx=1)
-
         # ── PanedWindow: notebook on top, console below — both resizable ──
         self._pane = ttk.PanedWindow(self, orient="vertical")
         self._pane.pack(fill="both", expand=True, padx=8, pady=(4, 0))
@@ -540,8 +526,21 @@ class TrustTunnelWindow(tk.Tk):
         servers_tab = tk.Frame(self._notebook, bg=BG)
         self._notebook.add(servers_tab, text="Servers")
 
-        # Header row (plain tk.Frame + tk.Labels — immune to ttk theme)
-        header = tk.Frame(servers_tab, bg="#3a3a3a", height=28)
+        # ── Servers tab toolbar (above the list, top-right) ──
+        toolbar = tk.Frame(servers_tab, bg=BG, height=32)
+        toolbar.pack(fill="x", padx=8, pady=(4, 2))
+        toolbar.pack_propagate(False)
+
+        tk.Label(toolbar, text="Servers", bg=BG, fg="#888",
+                 font=("Helvetica", 10, "bold")).pack(side="left", padx=(0, 8))
+
+        _make_button(toolbar, text="Import tt://", command=self._import_deeplink,
+                     style="SmallDark.TButton").pack(side="right", padx=2)
+        _make_button(toolbar, text="+ Add Server", command=self._add_server,
+                     style="SmallDark.TButton").pack(side="right", padx=2)
+
+        # Header row
+        header = tk.Frame(servers_tab, bg="#3a3a3a", height=26)
         header.pack(fill="x")
         header.pack_propagate(False)
         for text, anchor, side, padx in [
@@ -554,9 +553,7 @@ class TrustTunnelWindow(tk.Tk):
                      font=("Helvetica", 10, "bold"), anchor=anchor
                      ).pack(side=side, padx=padx, fill="y")
 
-        # Scrollable frame-based server list — tk.Label renders text
-        # correctly on macOS unlike Canvas.create_text which renders
-        # white as grey due to subpixel compositing.
+        # Scrollable frame-based server list
         list_frame = tk.Frame(servers_tab, bg="#1a1a1a")
         list_frame.pack(fill="both", expand=True)
 
@@ -566,18 +563,14 @@ class TrustTunnelWindow(tk.Tk):
         self._srv_inner = tk.Frame(list_frame, bg="#1a1a1a")
         self._srv_inner.pack(fill="both", expand=True)
 
-        # Column proportions via grid
-        self._srv_inner.grid_columnconfigure(0, weight=2, minsize=120)
-        self._srv_inner.grid_columnconfigure(1, weight=2, minsize=120)
-        self._srv_inner.grid_columnconfigure(2, weight=2, minsize=120)
-        self._srv_inner.grid_columnconfigure(3, weight=1, minsize=80)
-
         # Row labels stored for refresh
         self._row_frames: list[tk.Frame] = []
         self._row_labels: list[list[tk.Label]] = []
         self._row_buttons: list[tk.Button] = []
+        self._row_edit_btns: list[tk.Button] = []
+        self._row_del_btns: list[tk.Button] = []
 
-        self._tree = self._srv_inner  # alias for legacy callers
+        self._tree = self._srv_inner
         self._canvas_row_iids: list[int] = []
 
         # ── Tab 2: Bypass ──
@@ -676,10 +669,16 @@ class TrustTunnelWindow(tk.Tk):
         for btn in self._row_buttons:
             btn.destroy()
         self._row_buttons.clear()
+        for btn in self._row_edit_btns:
+            btn.destroy()
+        self._row_edit_btns.clear()
+        for btn in self._row_del_btns:
+            btn.destroy()
+        self._row_del_btns.clear()
         self._canvas_row_iids.clear()
 
     def _refresh_server_list(self):
-        """Rebuild server list rows using tk.Label (renders correctly on macOS)."""
+        """Rebuild server list rows: Server | Connect | Hostname | Address | Username | ✏️ 🗑️"""
         self._clear_rows()
 
         connected_name = (
@@ -702,57 +701,80 @@ class TrustTunnelWindow(tk.Tk):
             else:
                 row_bg, text_fg = "#1a1a1a", "#ffffff"
 
-            # Row frame
             row_frame = tk.Frame(self._srv_inner, bg=row_bg, height=self.ROW_H)
-            row_frame.grid(row=i, column=0, columnspan=4, sticky="ew")
-            row_frame.grid_propagate(False)
-
-            # Click to select
+            row_frame.pack(fill="x")
             row_frame.bind("<Button-1>", lambda e, idx=i: self._on_row_click(idx))
 
-            addr = ",".join(s.endpoint.addresses) if s.endpoint.addresses else ""
-            texts = [s.name, s.endpoint.hostname, addr, s.endpoint.username]
-            col_labels = []
-            for col, label_text in enumerate(texts):
-                lbl = tk.Label(
-                    row_frame,
-                    text=label_text,
-                    bg=row_bg,
-                    fg=text_fg,
-                    font=("Helvetica", 11, "bold"),
-                    anchor="w",
-                    padx=8,
-                )
-                lbl.place(relx=col * 0.25, rely=0, relwidth=0.25, relheight=1.0, anchor="nw")
-                lbl.bind("<Button-1>", lambda e, idx=i: self._on_row_click(idx))
-                col_labels.append(lbl)
+            # Column 1: Server name
+            name_lbl = tk.Label(row_frame, text=s.name, bg=row_bg, fg=text_fg,
+                                font=("Helvetica", 11, "bold"), anchor="w", padx=8)
+            name_lbl.pack(side="left", fill="y", expand=True)
+            name_lbl.bind("<Button-1>", lambda e, idx=i: self._on_row_click(idx))
 
-            # Connect / Disconnect button
+            # Column 2: Connect / Disconnect button
             if is_busy:
-                btn_text, btn_bg, btn_fg = "…", "#444400", "#cca700"
+                btn_text, btn_bg, btn_fg = "…", "#2a2a00", "#cca700"
             elif is_connected:
-                btn_text, btn_bg, btn_fg = "Disconnect", "#6b1212", "#ff8080"
+                btn_text, btn_bg, btn_fg = "Disconnect", "#4a0a0a", "#ff8080"
             else:
-                btn_text, btn_bg, btn_fg = "Connect", "#003060", "#80c8ff"
+                btn_text, btn_bg, btn_fg = "Connect", "#002040", "#80c8ff"
 
-            btn = tk.Button(
-                row_frame,
-                text=btn_text,
+            conn_btn = tk.Button(
+                row_frame, text=btn_text,
                 font=("Helvetica", 9, "bold"),
-                bg=btn_bg,
-                fg=btn_fg,
-                activebackground=btn_bg,
-                activeforeground=btn_fg,
-                relief="flat",
-                borderwidth=0,
-                cursor="hand2",
+                bg=btn_bg, fg=btn_fg,
+                activebackground=btn_bg, activeforeground=btn_fg,
+                relief="flat", borderwidth=0, cursor="hand2",
                 command=lambda idx=i: self._toggle_connection(idx),
             )
-            btn.place(relx=1.0, rely=0.5, x=-8, anchor="e")
-            self._row_buttons.append(btn)
+            conn_btn.pack(side="left", padx=(0, 4), pady=4)
+
+            # Column 3: Hostname
+            host_lbl = tk.Label(row_frame, text=s.endpoint.hostname,
+                                bg=row_bg, fg=text_fg,
+                                font=("Helvetica", 10), anchor="w")
+            host_lbl.pack(side="left", fill="y", expand=True)
+
+            # Column 4: Address
+            addr = ",".join(s.endpoint.addresses) if s.endpoint.addresses else ""
+            addr_lbl = tk.Label(row_frame, text=addr,
+                                bg=row_bg, fg=text_fg,
+                                font=("Helvetica", 10), anchor="w")
+            addr_lbl.pack(side="left", fill="y", expand=True)
+
+            # Column 5: Username (last column — keep)
+            user_lbl = tk.Label(row_frame, text=s.endpoint.username,
+                                bg=row_bg, fg=text_fg,
+                                font=("Helvetica", 10), anchor="e", padx=8)
+            user_lbl.pack(side="left", fill="y")
+
+            # Column 6: Edit icon (pencil)
+            edit_btn = tk.Button(
+                row_frame, text="✏",
+                font=("Helvetica", 11),
+                bg=row_bg, fg="#888",
+                activebackground="#3a3a3a", activeforeground="#ccc",
+                relief="flat", borderwidth=0, cursor="hand2",
+                command=lambda idx=i: self._edit_server_by_index(idx),
+            )
+            edit_btn.pack(side="right", padx=(2, 0), pady=4)
+
+            # Column 7: Delete icon (trash)
+            del_btn = tk.Button(
+                row_frame, text="🗑",
+                font=("Helvetica", 11),
+                bg=row_bg, fg="#888",
+                activebackground="#3a3a3a", activeforeground="#ff8080",
+                relief="flat", borderwidth=0, cursor="hand2",
+                command=lambda idx=i: self._delete_server_by_index(idx),
+            )
+            del_btn.pack(side="right", padx=(0, 4), pady=4)
 
             self._row_frames.append(row_frame)
-            self._row_labels.append(col_labels)
+            self._row_labels.append([name_lbl, host_lbl, addr_lbl, user_lbl])
+            self._row_buttons.append(conn_btn)
+            self._row_edit_btns.append(edit_btn)
+            self._row_del_btns.append(del_btn)
             self._canvas_row_iids.append(i)
 
     def _on_row_click(self, idx: int):
@@ -832,33 +854,29 @@ class TrustTunnelWindow(tk.Tk):
         if dlg.result:
             self.servers.append(dlg.result)
             self._save_and_refresh()
-            idx = len(self.servers) - 1
-            self._tree.selection_set(str(idx))
-            self._tree.focus(str(idx))
+            self._selected_index = len(self.servers) - 1
 
-    def _edit_server(self):
-        if self._selected_index is None:
-            messagebox.showinfo("Note", "Select a server to edit first.")
-            return
-        dlg = AddEditDialog(self, profile=self.servers[self._selected_index])
+    def _edit_server_by_index(self, idx: int):
+        dlg = AddEditDialog(self, profile=self.servers[idx])
         self.wait_window(dlg)
         if dlg.result:
-            self.servers[self._selected_index] = dlg.result
+            self.servers[idx] = dlg.result
             self._save_and_refresh()
 
-    def _delete_server(self):
-        if self._selected_index is None:
-            messagebox.showinfo("Note", "Select a server to delete first.")
-            return
-        s = self.servers[self._selected_index]
-        if messagebox.askyesno("Delete", f"Delete '{s.name}'?", parent=self):
-            self.servers.pop(self._selected_index)
-            self._selected_index = None
+    def _delete_server_by_index(self, idx: int):
+        s = self.servers[idx]
+        if messagebox.askyesno("Delete", f"Delete '{s.name}'?"):
+            self.servers.pop(idx)
+            if self._selected_index is not None:
+                if self._selected_index == idx:
+                    self._selected_index = None
+                elif self._selected_index > idx:
+                    self._selected_index -= 1
             self._save_and_refresh()
 
     def _import_deeplink(self):
         dlg = tk.Toplevel(self)
-        dlg.title("Import Deep-Link")
+        dlg.title("Import tt://")
         dlg.configure(bg="#252525")
         dlg.transient(self)
         dlg.resizable(False, False)
