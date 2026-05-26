@@ -1,12 +1,11 @@
 # TrustTunnel macOS GUI — dependencies
-#
-# Runtime deps (must be installed before running or building):
-#   - toml    → src/_vendor/toml/ (vendored, no install needed)
-#   - tkinter → bundled with Python
-#   - Pillow  → PIL image generation for tray icon (colored circle)
-#   - PyObjC  → macOS tray icon via NSStatusBar (ships with macOS Python, no install needed)
-#
-# Install: pip install Pillow
-#
-# Build-time dep: pyinstaller (handled by build-app.sh)
-Pillow>=9.0
+
+Runtime:
+- Python 3.11+
+- PyQt6 (GUI framework)
+- Pillow (icon generation)
+
+All handled by build-app.sh automatically.
+
+Build-time:
+- PyInstaller (bundled into .app by build-app.sh)

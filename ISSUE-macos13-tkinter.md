@@ -1,33 +1,27 @@
 # Issue: macOS 13 Ventura — Python 3.11 tkinter build fails
 
-## Problem
+**Status: Resolved** — app was rewritten from tkinter to PyQt6.
+
+## Original problem
+
 macOS 13 (Ventura) is Tier 3 for Homebrew — python@3.11 build fails with post-install errors.
 MacPorts python311 doesn't include _tkinter module.
 
-## Steps to reproduce
-1. Install MacPorts
-2. `sudo port install python311 py-tkinter` — _tkinter missing
-3. `brew install python@3.11` — build fails on Ventura (Tier 3)
+## Resolution
 
-## Expected
-Working Python 3.11 with tkinter for PyInstaller build on macOS 13 Intel.
+Rewrote the entire GUI from tkinter to PyQt6 (commit `8f84618`). PyQt6:
+- Installs cleanly via `pip install PyQt6` on all macOS versions
+- No tcl/tk dependency
+- Native dark mode support
+- Proper text rendering on Retina displays
+- QSystemTrayIcon for menu bar integration
 
-## Workaround attempted
-- Homebrew: `brew install tcl-tk && brew reinstall python@3.11` — build takes 11+ min, post-install fails
-- MacPorts: `sudo port install python311 py-tkinter` — _tkinter module missing
+## Current requirements
 
-## Diagnostic output
-```
-=== Diagnostic ===
---- Python versions ---
-/usr/local/bin/python3.11
-/usr/bin/python3
---- MacPorts Python ---
-MacPorts python3.11 not installed
---- Homebrew Python ---
-Python 3.11.15
-tkinter: FAIL
---- PyInstaller ---
-PyInstaller not installed
-=== End ===
-```
+- Python 3.11+ (Homebrew or MacPorts)
+- PyQt6 + Pillow (installed by `build-app.sh`)
+
+## See also
+
+- `README.md` — updated build instructions
+- `trusttunnel.spec` — PyInstaller config (no Tcl/Tk bundling)

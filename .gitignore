@@ -6,3 +6,7 @@ __pycache__/
 dist/
 build/
 .DS_Store
+icon.icns
+icon.png
+icon.iconset/
+*.egg
