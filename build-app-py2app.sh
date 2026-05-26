@@ -1,0 +1,246 @@
+#!/bin/bash
+# Build TrustTunnel.app for macOS distribution (PyQt6 + py2app)
+# Run this on your Mac (not on VPS — py2app needs target OS)
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+
+echo "=== TrustTunnel macOS App Builder (py2app) ==="
+echo ""
+
+# 1. Find Python 3.11+ with PyQt6
+echo "=== Checking Python + PyQt6 ==="
+echo ""
+
+PYTHON=""
+PYTHON_RAW=""
+PYTHON_PYQT=""
+
+check_candidate() {
+    local py="$1"
+    [ ! -e "$py" ] && return 1
+    [ ! -x "$py" ] && return 1
+
+    local raw_version
+    raw_version=$("$py" -c "import sys; print(sys.version.split()[0])" 2>/dev/null)
+    [ -z "$raw_version" ] && return 1
+
+    local major minor
+    major=$(echo "$raw_version" | cut -d. -f1)
+    minor=$(echo "$raw_version" | cut -d. -f2)
+    [ "$major" -lt 3 ] && return 1
+    [ "$major" -eq 3 ] && [ "$minor" -lt 11 ] && return 1
+
+    local pyqt_version
+    pyqt_version=$("$py" -c "
+try:
+    import importlib.metadata; print(importlib.metadata.version('PyQt6'))
+except Exception: pass
+" 2>/dev/null)
+
+    [ -z "$pyqt_version" ] && { echo "  [CHECK] $py -> Python $raw_version, PyQt6 missing"; return 1; }
+
+    echo "  [CHECK] $py -> Python $raw_version, PyQt6 $pyqt_version ✓"
+    PYTHON="$py"
+    PYTHON_RAW="$raw_version"
+    PYTHON_PYQT="$pyqt_version"
+    return 0
+}
+
+FOUND=0
+for candidate in \
+    /opt/homebrew/bin/python3.13 /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11 \
+    /opt/homebrew/bin/python3 \
+    /usr/local/bin/python3.13 /usr/local/bin/python3.12 /usr/local/bin/python3.11 \
+    /usr/local/bin/python3 \
+    /opt/local/bin/python3.13 /opt/local/bin/python3.12 /opt/local/bin/python3.11 \
+    /opt/local/bin/python3 \
+    "$HOME/.pyenv/shims/python3.13" "$HOME/.pyenv/shims/python3.12" \
+    "$HOME/.pyenv/shims/python3.11" "$HOME/.pyenv/shims/python3" \
+    /usr/bin/python3; do
+    [ -z "$candidate" ] && continue
+    [ "$candidate" = "$PYTHON" ] 2>/dev/null && continue
+    if check_candidate "$candidate"; then
+        FOUND=1
+        break
+    fi
+done
+
+if [ "$FOUND" -eq 0 ]; then
+    for cmd in python3.13 python3.12 python3.11 python3; do
+        _resolved="$(command -v "$cmd" 2>/dev/null || true)"
+        if [ -n "$_resolved" ] && [ -x "$_resolved" ] && check_candidate "$_resolved"; then
+            FOUND=1; break
+        fi
+    done
+fi
+
+echo ""
+if [ "$FOUND" -eq 0 ]; then
+    echo "ERROR: No Python 3.11+ with PyQt6 found."
+    echo "Install: brew install python@3.12 && pip3 install PyQt6 py2app Pillow"
+    exit 1
+fi
+
+echo "Found: $PYTHON (Python $PYTHON_RAW, PyQt6 $PYTHON_PYQT)"
+echo ""
+
+# 1.4. On Apple Silicon, prefer arm64 Python
+if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+    PY_FILE=$(command -v "$PYTHON" 2>/dev/null || echo "$PYTHON")
+    if file "$PY_FILE" 2>/dev/null | grep -q "x86_64"; then
+        echo "  ⚠ Python is x86_64 — app will run under Rosetta."
+        echo "    For native arm64: arch -arm64 brew install python@3.12"
+        echo ""
+    fi
+fi
+
+# 2. Install build dependencies
+echo "=== Checking build dependencies ==="
+
+if ! "$PYTHON" -c "import py2app" 2>/dev/null; then
+    echo "  -> Installing py2app..."
+    "$PYTHON" -m pip install --quiet py2app 2>&1 || {
+        echo "  Failed to install py2app"
+        exit 1
+    }
+fi
+
+if ! "$PYTHON" -c "import PIL" 2>/dev/null; then
+    echo "  -> Installing Pillow..."
+    "$PYTHON" -m pip install --quiet Pillow 2>&1 || true
+fi
+echo "  OK"
+echo ""
+
+# 3. Download TrustTunnel client binary
+echo "=== TrustTunnel CLI client ==="
+if [ ! -f "bin/trusttunnel_client" ]; then
+    mkdir -p bin
+    TT_VERSION="v1.0.49"
+    TT_URL="https://github.com/TrustTunnel/TrustTunnelClient/releases/download/${TT_VERSION}/trusttunnel_client-${TT_VERSION}-macos-universal.tar.gz"
+    curl -fsSL "$TT_URL" | tar xz --strip-components=1 -C bin/ trusttunnel_client-${TT_VERSION}-macos-universal/trusttunnel_client
+    chmod +x bin/trusttunnel_client
+    rm -f bin/LICENSE bin/*.sig
+    echo "  bin/trusttunnel_client ($(du -sh bin/trusttunnel_client | cut -f1))"
+else
+    echo "  bin/trusttunnel_client (already bundled)"
+fi
+echo ""
+
+# 4. Generate icon
+echo "=== Generating icon ==="
+if [ -f "generate-icon.py" ]; then
+    rm -f icon.icns
+    "$PYTHON" generate-icon.py icon.icns
+    echo "  icon.icns created"
+else
+    echo "  generate-icon.py not found, skipping"
+fi
+echo ""
+
+# 5. Build .app with py2app
+echo "=== Building .app ==="
+
+# Clean previous build
+rm -rf build dist dist_arm64 dist_x86_64
+
+# On Apple Silicon, try universal2 if x86_64 Python exists
+if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+    X86_PYTHON=""
+    for _py in /usr/local/bin/python3.12 /usr/local/bin/python3.13 /usr/local/bin/python3.11; do
+        if [ -x "$_py" ] && file "$_py" 2>/dev/null | grep -q "x86_64"; then
+            X86_PYTHON="$_py"
+            break
+        fi
+    done
+
+    if [ -n "$X86_PYTHON" ]; then
+        echo "  Building universal2 (arm64 + x86_64)..."
+
+        echo "  [1/3] Building arm64..."
+        ARCHFLAGS="-arch arm64" "$PYTHON" setup.py py2app --distpath dist_arm64 2>&1
+        ARM_APP="dist_arm64/TrustTunnel.app"
+        [ -d "$ARM_APP" ] && echo "        -> $(file "$ARM_APP/Contents/MacOS/TrustTunnel" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)"
+
+        echo "  [2/3] Building x86_64..."
+        ARCHFLAGS="-arch x86_64" arch -x86_64 "$X86_PYTHON" setup.py py2app --distpath dist_x86_64 2>&1
+        X86_APP="dist_x86_64/TrustTunnel.app"
+        [ -d "$X86_APP" ] && echo "        -> $(file "$X86_APP/Contents/MacOS/TrustTunnel" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)"
+
+        echo "  [3/3] Merging with lipo..."
+        if [ -d "$ARM_APP" ] && [ -d "$X86_APP" ]; then
+            # Copy arm64 as base
+            rm -rf dist/TrustTunnel.app
+            cp -R "$ARM_APP" dist/TrustTunnel.app
+
+            # Lipo-merge the main binary
+            lipo -create "$ARM_APP/Contents/MacOS/TrustTunnel" \
+                        "$X86_APP/Contents/MacOS/TrustTunnel" \
+                   -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel 2>/dev/null
+
+            # Lipo-merge all .so/.dylib that exist in both builds with different arch
+            for arm_file in $(find "$ARM_APP/Contents" \( -name "*.so" -o -name "*.dylib" \) 2>/dev/null); do
+                rel="${arm_file#$ARM_APP/Contents/}"
+                x86_file="$X86_APP/Contents/$rel"
+                out_file="dist/TrustTunnel.app/Contents/$rel"
+                [ ! -f "$x86_file" ] && continue
+                arm_arch=$(file "$arm_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                x86_arch=$(file "$x86_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
+                if [ "$arm_arch" != "$x86_arch" ]; then
+                    mkdir -p "$(dirname "$out_file")"
+                    lipo -create "$arm_file" "$x86_file" -output "$out_file" 2>/dev/null && echo "    $rel: $arm_arch + $x86_arch -> merged"
+                fi
+            done
+
+            echo "  ✓ Universal2 binary created"
+        else
+            echo "  ✗ One build failed — using arm64 only"
+            cp -R "$ARM_APP" dist/TrustTunnel.app
+        fi
+    else
+        echo "  No x86_64 Python — building arm64 only"
+        "$PYTHON" setup.py py2app 2>&1
+    fi
+else
+    "$PYTHON" setup.py py2app 2>&1
+fi
+
+# 6. Verify and install
+APP="dist/TrustTunnel.app"
+echo ""
+if [ -d "$APP" ]; then
+    SIZE=$(du -sh "$APP" | cut -f1)
+    echo "App: $SCRIPT_DIR/$APP ($SIZE)"
+    echo ""
+
+    # Verify LSUIElement
+    if grep -aq "LSUIElement" "$APP/Contents/Info.plist" 2>/dev/null; then
+        echo "  ✓ LSUIElement found in Info.plist"
+    else
+        echo "  ✗ WARNING: LSUIElement NOT found in Info.plist"
+    fi
+
+    # Ad-hoc codesign
+    echo "  Signing (ad-hoc)..."
+    codesign --force --deep --sign - "$APP" 2>/dev/null && echo "  ✓ Signed" || echo "  ⚠ codesign failed"
+    xattr -cr "$APP" 2>/dev/null || true
+
+    # Install
+    echo ""
+    echo "=== Installing to /Applications ==="
+    rm -rf /Applications/TrustTunnel.app
+    cp -R "$APP" /Applications/
+    echo "  -> /Applications/TrustTunnel.app"
+
+    # Configure sudo
+    echo ""
+    echo "Configuring passwordless sudo..."
+    "$SCRIPT_DIR/setup-sudo.sh"
+
+    echo ""
+    echo "✓ Done! Launch from /Applications or Spotlight."
+else
+    echo "ERROR: Build failed."
+    exit 1
+fi
