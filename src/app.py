@@ -795,17 +795,6 @@ def _excepthook(exc_type, exc_val, exc_tb):
 sys.excepthook = _excepthook
 
 def main():
-    # Debug: enable Qt plugin diagnostics (remove after fixing)
-    # os.environ['QT_DEBUG_PLUGINS'] = '1'
-
-    # Ensure Qt platform plugins can be found in the bundle
-    if getattr(sys, 'frozen', False):
-        plugin_path = os.path.join(sys._MEIPASS, 'PyQt6', 'Qt6', 'plugins')
-        if not os.path.isdir(plugin_path):
-            plugin_path = os.path.join(sys._MEIPASS, 'PyQt6', 'plugins')
-        if os.path.isdir(plugin_path):
-            os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = plugin_path
-
     app = QApplication(sys.argv)
     app.setPalette(_dark_palette())
     app.setStyle("Fusion")
