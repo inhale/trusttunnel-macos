@@ -20,13 +20,18 @@ if TYPE_CHECKING:
 
 
 def _find_project_root() -> str:
-    """Find the project root directory, works in dev mode and PyInstaller bundle."""
-    # PyInstaller: bin/ directory is in Resources/
+    """Find the project root directory, works in dev mode and py2app bundle."""
+    # py2app: Resources/ is the bundle's resource directory
     if getattr(sys, 'frozen', False):
-        # sys._MEIPASS is the temporary dir where PyInstaller extracts data
-        base = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-        # Resources/bin/trusttunnel_client
-        return os.path.join(base)
+        # RESOURCEPATH is set by py2app to the bundle's Resources/ directory
+        base = os.environ.get('RESOURCEPATH', os.path.dirname(sys.executable))
+        # Contents/Resources/ -> Contents/ -> .app root
+        if os.path.basename(base) == 'Resources':
+            return os.path.dirname(base)
+        # Fallback: go up from MacOS/ to Contents/
+        if os.path.basename(base) == 'MacOS':
+            return os.path.dirname(base)
+        return base
     # Dev mode: src/client.py -> trusttunnel-macos/
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
