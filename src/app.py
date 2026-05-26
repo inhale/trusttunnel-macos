@@ -311,7 +311,7 @@ class TrustTunnelWindow:
         # Poll timer
         self._poll_timer = QTimer(self._main_window)
         self._poll_timer.timeout.connect(self._poll_status)
-        self._poll_timer.start(300)
+        self._poll_timer.start(1000)
 
     def _build(self):
         from PyQt6.QtWidgets import (
@@ -806,7 +806,9 @@ class TrustTunnelWindow:
             self._update_tray_icon(state)
 
     def _on_status_changed(self, status):
-        self._refresh_server_list()
+        # Status changed from background thread — just trigger a poll
+        # Don't call _refresh_server_list here to avoid double rebuild
+        pass
 
     def _on_log_line(self, line):
         self._log(line)
