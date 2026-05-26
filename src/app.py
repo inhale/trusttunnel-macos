@@ -189,6 +189,8 @@ class TrustTunnelWindow(QMainWindow):
         self.client = ClientManager()
         self.servers: list[ServerProfile] = load_servers()
         self._selected_index: Optional[int] = None
+        self._last_state = None
+        self._log_idx = 0
 
         # Signal bridge for thread-safe UI
         self._bridge = _SignalBridge()
