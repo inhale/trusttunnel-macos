@@ -264,79 +264,87 @@ if [ -d "$APP" ]; then
     # like Homebrew where py2app doesn't auto-create the framework structure).
     # The C stub at MacOS/TrustTunnel does dlopen() on PyRuntimeLocations,
     # so Frameworks/Python.framework/Versions/X.Y/Python must be a dylib.
-    PYTHON_VERSION=$(python3 -c "import sys; print('%d.%d' % sys.version_info[:2])")
-    LIBPYTHON="libpython${PYTHON_VERSION}.dylib"
-    PY_FW="$APP/Contents/Frameworks/Python.framework"
-    PY_FW_VERS="$PY_FW/Versions/$PYTHON_VERSION"
+    # Use a helper Python script to bundle the framework and fix Info.plist.
+    # This runs as: python3 - "$APP" (reads the script from stdin via heredoc)
+    "$PYTHON" - "$APP" << 'PYEOF'
+import sys, os, shutil, plistlib
 
-    if [ ! -e "$PY_FW_VERS/Python" ]; then
-        echo "  Bundling Python framework..."
-        mkdir -p "$PY_FW_VERS/lib"
+appdir = sys.argv[1]
 
-        # Find the dylib: try build tree, sys.prefix/lib, sysconfig LIBDIR
-        FOUND_LIB=""
-        for libpath in \
-            "build/bdist.macosx-*/python${PYTHON_VERSION}-standalone/app/Frameworks/${LIBPYTHON}" \
-            "$(python3 -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))" 2>/dev/null)/${LIBPYTHON}" \
-            "$(python3 -c "import sys; print(sys.prefix)" 2>/dev/null)/lib/${LIBPYTHON}" \
-            "/opt/homebrew/lib/${LIBPYTHON}" \
-            "/usr/local/lib/${LIBPYTHON}"; do
-            for p in $libpath; do
-                if [ -f "$p" ]; then FOUND_LIB="$p"; break 2; fi
-            done
-        done
+# Get version/runtime info from THIS Python (the one that built the app)
+py_ver = "%d.%d" % sys.version_info[:2]
+py_prefix = sys.prefix
+import sysconfig
+py_libdir = sysconfig.get_config_var("LIBDIR") or ""
 
-        if [ -z "$FOUND_LIB" ]; then
-            echo "  ✗ FATAL: Cannot find $LIBPYTHON"
-            exit 1
-        fi
+libpython = "libpython%s.dylib" % py_ver
+fw_dir = os.path.join(appdir, "Contents", "Frameworks", "Python.framework")
+fw_vers = os.path.join(fw_dir, "Versions", py_ver)
 
-        echo "    dylib: $FOUND_LIB"
-        cp "$FOUND_LIB" "$PY_FW_VERS/lib/${LIBPYTHON}"
-        # The framework 'Python' binary that dlopen() targets: symlink to the dylib
-        ln -sf "lib/${LIBPYTHON}" "$PY_FW_VERS/Python"
+if os.path.exists(os.path.join(fw_vers, "Python")):
+    print("  Python.framework already present: %s/Python" % fw_vers)
+else:
+    print("  Bundling Python %s framework..." % py_ver)
+    os.makedirs(os.path.join(fw_vers, "lib"), exist_ok=True)
+    os.makedirs(os.path.join(fw_dir, "Resources"), exist_ok=True)
 
-        # Framework symlinks
-        ln -sf "$PYTHON_VERSION" "$PY_FW/Versions/Current"
-        ln -sf "Versions/Current/Python" "$PY_FW/Python"
-        ln -sf "Versions/Current/lib" "$PY_FW/lib"
+    found = None
+    for d in [py_libdir, os.path.join(py_prefix, "lib"),
+              "/opt/homebrew/lib", "/usr/local/lib"]:
+        if d and os.path.isfile(os.path.join(d, libpython)):
+            found = os.path.join(d, libpython)
+            break
 
-        # Minimal framework Info.plist
-        cat > "$PY_FW/Resources/Info.plist" << FWPLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleName</key><string>Python</string>
-<key>CFBundleIdentifier</key><string>org.python.python</string>
-<key>CFBundleVersion</key><string>${PYTHON_VERSION}</string>
-<key>CFBundleShortVersionString</key><string>${PYTHON_VERSION}</string>
-<key>CFBundleExecutable</key><string>Python</string>
-<key>CFBundlePackageType</key><string>FMFW</string>
-<key>CFBundleSignature</key><string>????</string>
-</dict></plist>
-FWPLIST
+    if not found:
+        print("  FATAL: Cannot find %s" % libpython)
+        sys.exit(1)
 
-        echo "    → $PY_FW_VERS/Python → lib/${LIBPYTHON}"
-    else
-        echo "  Python.framework already present: $PY_FW_VERS/Python"
-    fi
+    print("    dylib: %s" % found)
+    shutil.copy2(found, os.path.join(fw_vers, "lib", libpython))
 
-    # Fix PyRuntimeLocations to match the framework we just created,
-    # and remove template-only keys from the app's Info.plist.
-    python3 -c "
-import plistlib
-p = '$APP/Contents/Info.plist'
-with open(p, 'rb') as f:
+    # Symlink: Versions/X.Y/Python -> lib/libpythonX.Y.dylib
+    py_bin = os.path.join(fw_vers, "Python")
+    if os.path.lexists(py_bin):
+        os.remove(py_bin)
+    os.symlink("lib/" + libpython, py_bin)
+
+    # Framework symlinks
+    for src, dst in [
+        (py_ver, os.path.join(fw_dir, "Versions", "Current")),
+        ("Versions/Current/Python", os.path.join(fw_dir, "Python")),
+        ("Versions/Current/lib", os.path.join(fw_dir, "lib")),
+    ]:
+        if os.path.lexists(dst):
+            os.remove(dst)
+        os.symlink(src, dst)
+
+    # Framework Info.plist
+    plist = {
+        "CFBundleName": "Python",
+        "CFBundleIdentifier": "org.python.python",
+        "CFBundleVersion": py_ver,
+        "CFBundleShortVersionString": py_ver,
+        "CFBundleExecutable": "Python",
+        "CFBundlePackageType": "FMFW",
+        "CFBundleSignature": "????",
+    }
+    with open(os.path.join(fw_dir, "Resources", "Info.plist"), "wb") as f:
+        plistlib.dump(plist, f)
+    print("    -> %s/Python -> lib/%s" % (fw_vers, libpython))
+
+# Fix app Info.plist: PyRuntimeLocations + clean template keys
+app_plist = os.path.join(appdir, "Contents", "Info.plist")
+with open(app_plist, "rb") as f:
     pl = plistlib.load(f)
-pl['PyRuntimeLocations'] = [
-    '@executable_path/../Frameworks/Python.framework/Versions/${PYTHON_VERSION}/Python'
+pl["PyRuntimeLocations"] = [
+    "@executable_path/../Frameworks/Python.framework/Versions/%s/Python" % py_ver
 ]
-for key in ('PyMainFileNames','PyResourcePackages'):
-    pl.pop(key, None)
-with open(p, 'wb') as f:
+for k in ("PyMainFileNames", "PyResourcePackages"):
+    pl.pop(k, None)
+with open(app_plist, "wb") as f:
     plistlib.dump(pl, f)
-print('  PyRuntimeLocations OK')
-" 2>&1
+print("  PyRuntimeLocations OK")
+PYEOF
 
     # Ad-hoc codesign
     echo "  Signing (ad-hoc)..."
