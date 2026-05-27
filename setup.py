@@ -34,6 +34,9 @@ OPTIONS = {
         "LSMinimumSystemVersion": "10.15",
         "NSHighResolutionCapable": True,
         "NSRequiresAquaSystemAppearance": False,
+        "PyRuntimeLocations": [
+            "@executable_path/../Frameworks/Python"
+        ],
         "LSUIElement": True,  # Hide Dock icon — app runs as UI element (tray only)
     },
 }

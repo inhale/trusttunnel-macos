@@ -254,6 +254,84 @@ if [ -d "$APP" ]; then
         echo "  ✗ WARNING: LSUIElement NOT found in Info.plist"
     fi
 
+    # Bundle Python shared library as a framework (for non-framework Pythons
+    # like Homebrew where py2app doesn't auto-create the framework structure).
+    # The C stub at MacOS/TrustTunnel does dlopen() on PyRuntimeLocations,
+    # so Frameworks/Python.framework/Versions/X.Y/Python must be a dylib.
+    PYTHON_VERSION=$(python3 -c "import sys; print('%d.%d' % sys.version_info[:2])")
+    LIBPYTHON="libpython${PYTHON_VERSION}.dylib"
+    PY_FW="$APP/Contents/Frameworks/Python.framework"
+    PY_FW_VERS="$PY_FW/Versions/$PYTHON_VERSION"
+
+    if [ ! -e "$PY_FW_VERS/Python" ]; then
+        echo "  Bundling Python framework..."
+        mkdir -p "$PY_FW_VERS/lib"
+
+        # Find the dylib: try build tree, sys.prefix/lib, sysconfig LIBDIR
+        FOUND_LIB=""
+        for libpath in \
+            "build/bdist.macosx-*/python${PYTHON_VERSION}-standalone/app/Frameworks/${LIBPYTHON}" \
+            "$(python3 -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))" 2>/dev/null)/${LIBPYTHON}" \
+            "$(python3 -c "import sys; print(sys.prefix)" 2>/dev/null)/lib/${LIBPYTHON}" \
+            "/opt/homebrew/lib/${LIBPYTHON}" \
+            "/usr/local/lib/${LIBPYTHON}"; do
+            for p in $libpath; do
+                if [ -f "$p" ]; then FOUND_LIB="$p"; break 2; fi
+            done
+        done
+
+        if [ -z "$FOUND_LIB" ]; then
+            echo "  ✗ FATAL: Cannot find $LIBPYTHON"
+            exit 1
+        fi
+
+        echo "    dylib: $FOUND_LIB"
+        cp "$FOUND_LIB" "$PY_FW_VERS/lib/${LIBPYTHON}"
+        # The framework 'Python' binary that dlopen() targets: symlink to the dylib
+        ln -sf "lib/${LIBPYTHON}" "$PY_FW_VERS/Python"
+
+        # Framework symlinks
+        ln -sf "$PYTHON_VERSION" "$PY_FW/Versions/Current"
+        ln -sf "Versions/Current/Python" "$PY_FW/Python"
+        ln -sf "Versions/Current/lib" "$PY_FW/lib"
+
+        # Minimal framework Info.plist
+        cat > "$PY_FW/Resources/Info.plist" << FWPLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleName</key><string>Python</string>
+<key>CFBundleIdentifier</key><string>org.python.python</string>
+<key>CFBundleVersion</key><string>${PYTHON_VERSION}</string>
+<key>CFBundleShortVersionString</key><string>${PYTHON_VERSION}</string>
+<key>CFBundleExecutable</key><string>Python</string>
+<key>CFBundlePackageType</key><string>FMFW</string>
+<key>CFBundleSignature</key><string>????</string>
+</dict></plist>
+FWPLIST
+
+        echo "    → $PY_FW_VERS/Python → lib/${LIBPYTHON}"
+    else
+        echo "  Python.framework already present: $PY_FW_VERS/Python"
+    fi
+
+    # Fix PyRuntimeLocations to match the framework we just created,
+    # and remove template-only keys from the app's Info.plist.
+    python3 -c "
+import plistlib
+p = '$APP/Contents/Info.plist'
+with open(p, 'rb') as f:
+    pl = plistlib.load(f)
+pl['PyRuntimeLocations'] = [
+    '@executable_path/../Frameworks/Python.framework/Versions/${PYTHON_VERSION}/Python'
+]
+for key in ('PyMainFileNames','PyResourcePackages'):
+    pl.pop(key, None)
+with open(p, 'wb') as f:
+    plistlib.dump(pl, f)
+print('  PyRuntimeLocations OK')
+" 2>&1
+
     # Ad-hoc codesign
     echo "  Signing (ad-hoc)..."
     codesign --force --deep --sign - "$APP" 2>/dev/null && echo "  ✓ Signed" || echo "  ⚠ codesign failed"
