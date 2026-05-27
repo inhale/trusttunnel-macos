@@ -1,6 +1,6 @@
 #!/bin/bash
 # Create a GitHub Release and upload the built TrustTunnel.app as a zip.
-# Run this on your Mac AFTER build-app.sh has completed successfully.
+# Run this on your Mac AFTER build-app-py2app.sh has completed successfully.
 #
 # Usage:
 #   ./release.sh           — auto-increments patch version (1.0.0 → 1.0.1)
