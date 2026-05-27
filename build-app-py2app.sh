@@ -146,7 +146,7 @@ echo "=== Building .app ==="
 rm -rf build dist dist_arm64 dist_x86_64
 
 # On Apple Silicon, try universal2 if x86_64 Python exists
-if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+if false && [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
     X86_PYTHON=""
     for _py in /usr/local/bin/python3.12 /usr/local/bin/python3.13 /usr/local/bin/python3.11; do
         if [ -x "$_py" ] && file "$_py" 2>/dev/null | grep -q "x86_64"; then
@@ -157,34 +157,59 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
 
     if [ -n "$X86_PYTHON" ]; then
         echo "  Building universal2 (arm64 + x86_64)..."
+        echo ""
 
+        # --- arm64 build ---
         echo "  [1/3] Building arm64..."
         rm -rf build dist dist_arm64
-        ARCHFLAGS="-arch arm64" "$PYTHON" setup.py py2app 2>&1
-        [ -d "dist/TrustTunnel.app" ] && mv dist/TrustTunnel.app dist_arm64/TrustTunnel.app
-        ARM_APP="dist_arm64/TrustTunnel.app"
-        [ -d "$ARM_APP" ] && echo "        -> $(file "$ARM_APP/Contents/MacOS/TrustTunnel" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)"
+        mkdir -p dist_arm64
+        ARCHFLAGS="-arch arm64" "$PYTHON" setup.py py2app 2>&1 | tee /tmp/py2app_arm64.log
+        if [ -d "dist/TrustTunnel.app" ]; then
+            mv dist/TrustTunnel.app dist_arm64/TrustTunnel.app
+            ARM_APP="dist_arm64/TrustTunnel.app"
+            echo "        -> $(file "$ARM_APP/Contents/MacOS/TrustTunnel" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)"
+        else
+            ARM_APP=""
+            echo "        -> FAILED"
+            tail -10 /tmp/py2app_arm64.log
+            echo ""
+            echo "ARM64 BUILD FAILED — cannot continue."
+            exit 1
+        fi
+        echo ""
 
+        # --- x86_64 build ---
         echo "  [2/3] Building x86_64..."
-        # Ensure x86_64 Python has py2app + modulegraph
         "$X86_PYTHON" -c "import py2app" 2>/dev/null || "$X86_PYTHON" -m pip install --quiet --break-system-packages py2app modulegraph 2>&1
-        rm -rf build dist dist_x86_64
-        ARCHFLAGS="-arch x86_64" arch -x86_64 "$X86_PYTHON" setup.py py2app 2>&1
-        [ -d "dist/TrustTunnel.app" ] && mv dist/TrustTunnel.app dist_x86_64/TrustTunnel.app
-        X86_APP="dist_x86_64/TrustTunnel.app"
+        "$X86_PYTHON" -c "import PIL" 2>/dev/null || "$X86_PYTHON" -m pip install --quiet --break-system-packages Pillow 2>&1
+        # Clear all py2app caches to pick up newly installed modules
+        rm -rf build .eggs
+        [ -d "$HOME/.py2app" ] && rm -rf "$HOME/.py2app"
+        mkdir -p dist_x86_64
+        ARCHFLAGS="-arch x86_64" arch -x86_64 "$X86_PYTHON" setup.py py2app 2>&1 | tee /tmp/py2app_x86_64.log
+        if [ -d "dist/TrustTunnel.app" ]; then
+            mv dist/TrustTunnel.app dist_x86_64/TrustTunnel.app
+            X86_APP="dist_x86_64/TrustTunnel.app"
+            echo "        -> $(file "$X86_APP/Contents/MacOS/TrustTunnel" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)"
+        else
+            X86_APP=""
+            echo "        -> FAILED"
+            tail -10 /tmp/py2app_x86_64.log
+            echo ""
+            echo "X86_64 BUILD FAILED — falling back to arm64 only."
+        fi
+        echo ""
 
-        echo "  [3/3] Merging with lipo..."
-        if [ -d "$ARM_APP" ] && [ -d "$X86_APP" ]; then
-            # Copy arm64 as base
+        # --- merge ---
+        echo "  [3/3] Merging..."
+        if [ -d "$ARM_APP" ] && [ -n "$X86_APP" ] && [ -d "$X86_APP" ]; then
             rm -rf dist/TrustTunnel.app
             cp -R "$ARM_APP" dist/TrustTunnel.app
 
-            # Lipo-merge the main binary
             lipo -create "$ARM_APP/Contents/MacOS/TrustTunnel" \
                         "$X86_APP/Contents/MacOS/TrustTunnel" \
                    -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel 2>/dev/null
 
-            # Lipo-merge all .so/.dylib that exist in both builds with different arch
             for arm_file in $(find "$ARM_APP/Contents" \( -name "*.so" -o -name "*.dylib" \) 2>/dev/null); do
                 rel="${arm_file#$ARM_APP/Contents/}"
                 x86_file="$X86_APP/Contents/$rel"
@@ -197,11 +222,14 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                     lipo -create "$arm_file" "$x86_file" -output "$out_file" 2>/dev/null && echo "    $rel: $arm_arch + $x86_arch -> merged"
                 fi
             done
-
-            echo "  ✓ Universal2 binary created"
-        else
-            echo "  ✗ One build failed — using arm64 only"
+            echo "  ✓ Universal2 binary"
+        elif [ -d "$ARM_APP" ]; then
+            rm -rf dist/TrustTunnel.app
             cp -R "$ARM_APP" dist/TrustTunnel.app
+            echo "  → arm64 only (x86_64 build failed)"
+        else
+            echo "  ✗ FATAL: arm64 build artifact missing"
+            exit 1
         fi
     else
         echo "  No x86_64 Python — building arm64 only"
