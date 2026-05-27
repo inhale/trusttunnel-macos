@@ -332,6 +332,16 @@ else:
         plistlib.dump(plist, f)
     print("    -> %s/Python -> lib/%s" % (fw_vers, libpython))
 
+# Copy the real Python interpreter to Contents/MacOS/python.
+# The C stub's getPythonInterpreter() looks for an auxiliary executable
+# named "python" via CFBundleCopyAuxiliaryExecutableURL. Without it,
+# CFStringGetCString crashes on the NULL return value.
+python_bin = os.path.join(appdir, "Contents", "MacOS", "python")
+import shutil
+shutil.copy2(sys.executable, python_bin)
+os.chmod(python_bin, 0o755)
+print("    -> %s (interpreter)" % python_bin)
+
 # Fix app Info.plist: PyRuntimeLocations + clean template keys
 app_plist = os.path.join(appdir, "Contents", "Info.plist")
 with open(app_plist, "rb") as f:
@@ -339,7 +349,7 @@ with open(app_plist, "rb") as f:
 pl["PyRuntimeLocations"] = [
     "@executable_path/../Frameworks/Python.framework/Versions/%s/Python" % py_ver
 ]
-for k in ("PyMainFileNames", "PyResourcePackages"):
+for k in ("PyResourcePackages",):
     pl.pop(k, None)
 with open(app_plist, "wb") as f:
     plistlib.dump(pl, f)

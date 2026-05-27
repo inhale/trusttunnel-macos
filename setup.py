@@ -12,7 +12,8 @@ APP = ["run.py"]
 DATA_FILES = [
     ("", ["generate-icon.py", "icon.icns", "PkgInfo"]),
     ("", ["bin/trusttunnel_client"]),
-    ("src", ["src/config.py", "src/client.py", "src/rate_limiter.py"]),
+    ("src", ["src/config.py", "src/client.py"]),
+    ("", ["rate_limiter.py"]),
 ]
 
 OPTIONS = {
