@@ -254,6 +254,12 @@ if [ -d "$APP" ]; then
         echo "  ✗ WARNING: LSUIElement NOT found in Info.plist"
     fi
 
+    # DEBUG: show what's in the bundle before our fix
+    echo "  [DEBUG] Frameworks/ contents:"
+    ls -la "$APP/Contents/Frameworks/" 2>&1 | head -5
+    echo "  [DEBUG] Looking for libpython..."
+    find "$APP" -name "libpython*" -type f 2>/dev/null | head -5
+
     # Bundle Python shared library as a framework (for non-framework Pythons
     # like Homebrew where py2app doesn't auto-create the framework structure).
     # The C stub at MacOS/TrustTunnel does dlopen() on PyRuntimeLocations,
