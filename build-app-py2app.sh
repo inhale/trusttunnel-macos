@@ -146,7 +146,7 @@ echo "=== Building .app ==="
 rm -rf build dist dist_arm64 dist_x86_64
 
 # On Apple Silicon, try universal2 if x86_64 Python exists
-if false && [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
     X86_PYTHON=""
     for _py in /usr/local/bin/python3.12 /usr/local/bin/python3.13 /usr/local/bin/python3.11; do
         if [ -x "$_py" ] && file "$_py" 2>/dev/null | grep -q "x86_64"; then
