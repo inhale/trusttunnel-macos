@@ -774,6 +774,14 @@ class TrustTunnelWindow:
             self._last_state = state
             self._refresh_server_list()
             self._update_tray_icon(state)
+            # Show error dialog on transition to ERROR
+            if state == ClientState.ERROR and status.error:
+                from PyQt6.QtWidgets import QMessageBox
+                QMessageBox.critical(
+                    self._main_window,
+                    "Connection Error",
+                    status.error,
+                )
 
     def _on_status_changed(self, status):
         # Status changed from background thread — just trigger a poll

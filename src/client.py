@@ -4,6 +4,8 @@ Now with pre-flight checks, phased connection progress, and rich diagnostics.
 """
 
 import os
+import ipaddress
+import re
 import signal
 import subprocess
 import sys
@@ -67,6 +69,96 @@ def _get_binary_paths() -> list:
 
 
 CLIENT_BINARY_PATHS = _get_binary_paths()
+
+
+def _detect_competing_vpn() -> list[str]:
+    """Detect existing VPN interfaces and routes that may conflict with TrustTunnel.
+
+    Returns a list of human-readable warnings about competing network configurations.
+    """
+    warnings = []
+
+    # 1. Check for utun interfaces with active routes (sign of another VPN)
+    try:
+        result = subprocess.run(
+            ["netstat", "-rn"],
+            capture_output=True, text=True, timeout=5,
+        )
+        utun_gateways = set()
+        utun_default = False
+        for line in result.stdout.splitlines():
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            dest = parts[0]
+            gateway = parts[1] if len(parts) > 1 else ""
+            iface = parts[-1] if len(parts) > 2 else ""
+            if iface.startswith("utun"):
+                utun_gateways.add(iface)
+                if dest in ("default", "0/1", "128.0/1", "0.0.0.0/0"):
+                    utun_default = True
+        if utun_default:
+            warnings.append(
+                f"Another VPN appears to be active ({', '.join(sorted(utun_gateways))}). "
+                "Its routes may conflict with TrustTunnel."
+            )
+    except Exception:
+        pass
+
+    # 2. Check for common VPN interfaces (utun0-utun7 typically used by other VPNs)
+    try:
+        result = subprocess.run(
+            ["ifconfig"],
+            capture_output=True, text=True, timeout=5,
+        )
+        active_utun = set()
+        for block in result.stdout.split("\n\n"):
+            m = re.match(r"(utun\d+):", block)
+            if m:
+                iface = m.group(1)
+                if "inet " in block or "RUNNING" in block:
+                    active_utun.add(iface)
+        if active_utun:
+            warnings.append(
+                f"Active utun interfaces detected: {', '.join(sorted(active_utun))}. "
+                "These may belong to another VPN connection."
+            )
+    except Exception:
+        pass
+
+    # 3. Check for common VPN processes
+    vpn_processes = []
+    common_vpn_names = [
+        "wireguard", "openvpn", "vpn", "nordvpn", "expressvpn",
+        "surfshark", "mullvad", "protonvpn", "tunnelbear",
+        "cisco", "anyconnect", "globalprotect", "forticlient",
+        "wireguard-go", "tailscale",
+    ]
+    try:
+        result = subprocess.run(
+            ["ps", "aux"],
+            capture_output=True, text=True, timeout=5,
+        )
+        seen = set()
+        for line in result.stdout.splitlines():
+            for vpn_name in common_vpn_names:
+                if vpn_name in line.lower():
+                    # Extract process name
+                    parts = line.split()
+                    if len(parts) >= 11:
+                        proc_name = parts[10]
+                        if proc_name not in seen:
+                            seen.add(proc_name)
+                            vpn_processes.append(proc_name)
+        if vpn_processes:
+            warnings.append(
+                f"VPN-related processes running: {', '.join(sorted(vpn_processes))}. "
+                "These may interfere with TrustTunnel."
+            )
+    except Exception:
+        pass
+
+    return warnings
 
 
 class ClientState(Enum):
@@ -284,7 +376,17 @@ class ClientManager:
             self._set_error(f"sudo check failed:\n{sudo_msg}")
             return False
 
-        # ── Pre-flight 3: write config ──
+        # ── Pre-flight 3: check for competing VPNs ──
+        vpn_warnings = _detect_competing_vpn()
+        if vpn_warnings:
+            warning_text = "\n\n".join(vpn_warnings)
+            with self._lock:
+                self._status.log_lines.append(
+                    f"[{_ts()}] WARNING: {warning_text}"
+                )
+            # Don't block — just warn. The connection might still work.
+
+        # ── Pre-flight 4: write config ──
         self._set_phase(ConnectPhase.WRITING_CONFIG)
         toml_content = profile.to_client_toml()
         config_path = os.path.join(
@@ -428,7 +530,42 @@ class ClientManager:
                         ):
                             self._status.state = ClientState.ERROR
                             self._status.phase = ConnectPhase.FAILED
-                            self._status.error = line.strip()
+                            # Build actionable error message
+                            error_msg = line.strip()
+                            if "unable to setup routes" in lower:
+                                error_msg += (
+                                    "\n\n"
+                                    "This usually means another VPN or network "
+                                    "configuration is conflicting with TrustTunnel.\n\n"
+                                    "Try:\n"
+                                    "  1. Disconnect any other VPN (check menu bar icons)\n"
+                                    "  2. Check System Settings → Network for active VPN configs\n"
+                                    "  3. If on a corporate network, contact IT about routing policies\n\n"
+                                    "Diagnostic info:\n"
+                                )
+                                # Run diagnostics
+                                vpn_warnings = _detect_competing_vpn()
+                                if vpn_warnings:
+                                    error_msg += "\n".join(f"  • {w}" for w in vpn_warnings)
+                                else:
+                                    error_msg += "  No competing VPN detected.\n"
+                                # Check current routes
+                                try:
+                                    route_result = subprocess.run(
+                                        ["netstat", "-rn"],
+                                        capture_output=True, text=True, timeout=3,
+                                    )
+                                    default_routes = [
+                                        l for l in route_result.stdout.splitlines()
+                                        if l.split()[0] in ("default", "0/1", "128.0/1")
+                                    ] if route_result.stdout else []
+                                    if default_routes:
+                                        error_msg += "  Active default routes:\n"
+                                        for r in default_routes:
+                                            error_msg += f"    {r.strip()}\n"
+                                except Exception:
+                                    pass
+                            self._status.error = error_msg
                     self._notify()
                     continue
                 # Detect connection established — only on explicit tunnel-up signals
