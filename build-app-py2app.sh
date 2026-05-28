@@ -282,16 +282,32 @@ fi
 
 # lipo Qt frameworks (arm64 from app, x86_64 from system PyQt6 or Homebrew Qt)
 echo "  Merging Qt frameworks..."
-QT6_ARM="/opt/homebrew/opt/qt@6/lib"
+# Find arm64 Qt frameworks (from the app build)
+QT6_ARM=""
+for _d in \
+    /opt/homebrew/lib/python3.12/site-packages/PyQt6/Qt6/lib \
+    /opt/homebrew/opt/qt@6/lib \
+    /opt/homebrew/lib; do
+    if [ -f "$_d/QtCore.framework/Versions/A/QtCore" ]; then
+        QT6_ARM="$_d"
+        break
+    fi
+done
 
 # Find x86_64 Qt frameworks
 X86_QT6=""
 # Check x86_64 PyQt6's bundled Qt
 for _d in /usr/local/lib/python3.12/site-packages/PyQt6/Qt6/lib \
           /usr/local/lib/python3.11/site-packages/PyQt6/Qt6/lib; do
-    if [ -f "$_d/QtCore.framework/Versions/A/QtCore" ] && file "$_d/QtCore.framework/Versions/A/QtCore" 2>/dev/null | grep -q "x86_64"; then
-        X86_QT6="$_d"
-        break
+    if [ -f "$_d/QtCore.framework/Versions/A/QtCore" ]; then
+        _arch=$(file "$_d/QtCore.framework/Versions/A/QtCore" 2>/dev/null | grep -o "x86_64")
+        if [ -n "$_arch" ]; then
+            X86_QT6="$_d"
+            echo "  [DEBUG] x86_64 Qt found in PyQt6: $_d"
+            break
+        else
+            echo "  [DEBUG] PyQt6 Qt at $_d is NOT x86_64"
+        fi
     fi
 done
 # Fallback: check Homebrew Cellar
@@ -299,9 +315,13 @@ if [ -z "$X86_QT6" ]; then
     for _d in /usr/local/Cellar/qt@6/*/lib /usr/local/opt/qt@6/lib /usr/local/lib; do
         if [ -f "$_d/QtCore.framework/Versions/A/QtCore" ] && file "$_d/QtCore.framework/Versions/A/QtCore" 2>/dev/null | grep -q "x86_64"; then
             X86_QT6="$_d"
+            echo "  [DEBUG] x86_64 Qt found in Homebrew: $_d"
             break
         fi
     done
+fi
+if [ -z "$X86_QT6" ]; then
+    echo "  [DEBUG] No x86_64 Qt found anywhere"
 fi
 
 if [ -n "$X86_QT6" ] && [ -d "$QT6_ARM" ]; then
