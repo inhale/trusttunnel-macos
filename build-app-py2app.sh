@@ -280,12 +280,34 @@ if [ -n "$X86_APP" ]; then
     done
 fi
 
-# lipo Qt frameworks (arm64 from app, x86_64 from system Qt)
+# lipo Qt frameworks (arm64 from app, x86_64 from system PyQt6 or Homebrew Qt)
 echo "  Merging Qt frameworks..."
 QT6_ARM="/opt/homebrew/opt/qt@6/lib"
 
+# Find x86_64 Qt frameworks
+X86_QT6=""
+# Check x86_64 PyQt6's bundled Qt
+for _d in /usr/local/lib/python3.12/site-packages/PyQt6/Qt6/lib \
+          /usr/local/lib/python3.11/site-packages/PyQt6/Qt6/lib; do
+    if [ -f "$_d/QtCore.framework/Versions/A/QtCore" ] && file "$_d/QtCore.framework/Versions/A/QtCore" 2>/dev/null | grep -q "x86_64"; then
+        X86_QT6="$_d"
+        break
+    fi
+done
+# Fallback: check Homebrew Cellar
+if [ -z "$X86_QT6" ]; then
+    for _d in /usr/local/Cellar/qt@6/*/lib /usr/local/opt/qt@6/lib /usr/local/lib; do
+        if [ -f "$_d/QtCore.framework/Versions/A/QtCore" ] && file "$_d/QtCore.framework/Versions/A/QtCore" 2>/dev/null | grep -q "x86_64"; then
+            X86_QT6="$_d"
+            break
+        fi
+    done
+fi
+
 if [ -n "$X86_QT6" ] && [ -d "$QT6_ARM" ]; then
+    echo "  x86_64 Qt found: $X86_QT6"
     APP_QT="dist/TrustTunnel.app/Contents/Resources/lib/python3.12/PyQt6/Qt6/lib"
+    MERGED=0
     for fw in "$APP_QT"/*.framework; do
         [ ! -d "$fw" ] && continue
         fw_name=$(basename "$fw" .framework)
@@ -298,11 +320,99 @@ if [ -n "$X86_QT6" ] && [ -d "$QT6_ARM" ]; then
         [ "$arm_arch" = "$x86_arch" ] && continue
         lipo -create "$arm_bin" "$x86_bin" -output "$arm_bin.tmp" 2>/dev/null && \
             mv "$arm_bin.tmp" "$arm_bin" && \
-            echo "    Qt $fw_name: $arm_arch + $x86_arch"
+            echo "    Qt $fw_name: $arm_arch + $x86_arch" && \
+            MERGED=$((MERGED + 1))
     done
+    echo "  ✓ Merged $MERGED Qt frameworks"
 else
     echo "  ⚠ No x86_64 Qt found — Qt frameworks will be arm64 only"
 fi
+
+# lipo Qt plugins (arm64 in app, x86_64 from system PyQt6)
+X86_QT_PLUGINS="/usr/local/lib/python3.12/site-packages/PyQt6/Qt6/plugins"
+ARM_QT_PLUGINS="dist/TrustTunnel.app/Contents/Resources/lib/python3.12/PyQt6/Qt6/plugins"
+if [ -d "$X86_QT_PLUGINS" ] && [ -d "$ARM_QT_PLUGINS" ]; then
+    for plugindir in "$ARM_QT_PLUGINS"/*/; do
+        [ ! -d "$plugindir" ] && continue
+        x86_plugindir="$X86_QT_PLUGINS/$(basename "$plugindir")"
+        [ ! -d "$x86_plugindir" ] && continue
+        for dylib in "$plugindir"/*.dylib; do
+            [ ! -f "$dylib" ] && continue
+            base=$(basename "$dylib")
+            x86_dylib="$x86_plugindir/$base"
+            [ ! -f "$x86_dylib" ] && continue
+            arm_arch=$(file "$dylib" | grep -o 'arm64\|x86_64' | head -1)
+            x86_arch=$(file "$x86_dylib" | grep -o 'arm64\|x86_64' | head -1)
+            [ "$arm_arch" = "$x86_arch" ] && continue
+            lipo -create "$dylib" "$x86_dylib" -output "$dylib.tmp" 2>/dev/null && \
+                mv "$dylib.tmp" "$dylib" && \
+                echo "    plugin $base: $arm_arch + $x86_arch"
+        done
+    done
+fi
+
+# lipo Qt QML plugins
+X86_QML="/usr/local/lib/python3.12/site-packages/PyQt6/Qt6/qml"
+ARM_QML="dist/TrustTunnel.app/Contents/Resources/lib/python3.12/PyQt6/Qt6/qml"
+if [ -d "$X86_QML" ] && [ -d "$ARM_QML" ]; then
+    for qmldir in "$ARM_QML"/*/; do
+        [ ! -d "$qmldir" ] && continue
+        x86_qmldir="$X86_QML/$(basename "$qmldir")"
+        [ ! -d "$x86_qmldir" ] && continue
+        for dylib in "$qmldir"/*.dylib; do
+            [ ! -f "$dylib" ] && continue
+            base=$(basename "$dylib")
+            x86_dylib="$x86_qmldir/$base"
+            [ ! -f "$x86_dylib" ] && continue
+            arm_arch=$(file "$dylib" | grep -o 'arm64\|x86_64' | head -1)
+            x86_arch=$(file "$x86_dylib" | grep -o 'arm64\|x86_64' | head -1)
+            [ "$arm_arch" = "$x86_arch" ] && continue
+            lipo -create "$dylib" "$x86_dylib" -output "$dylib.tmp" 2>/dev/null && \
+                mv "$dylib.tmp" "$dylib" && \
+                echo "    qml $base: $arm_arch + $x86_arch"
+        done
+    done
+fi
+
+# lipo PIL .dylibs (arm64 in app, x86_64 from system PIL)
+X86_PIL_DYLIBS="/usr/local/lib/python3.12/site-packages/PIL/.dylibs"
+ARM_PIL_DYLIBS="dist/TrustTunnel.app/Contents/Resources/lib/python3.12/PIL/.dylibs"
+if [ -d "$X86_PIL_DYLIBS" ] && [ -d "$ARM_PIL_DYLIBS" ]; then
+    for dylib in "$ARM_PIL_DYLIBS"/*.dylib; do
+        [ ! -f "$dylib" ] && continue
+        base=$(basename "$dylib")
+        x86_dylib="$X86_PIL_DYLIBS/$base"
+        [ ! -f "$x86_dylib" ] && continue
+        arm_arch=$(file "$dylib" | grep -o 'arm64\|x86_64' | head -1)
+        x86_arch=$(file "$x86_dylib" | grep -o 'arm64\|x86_64' | head -1)
+        [ "$arm_arch" = "$x86_arch" ] && continue
+        lipo -create "$dylib" "$x86_dylib" -output "$dylib.tmp" 2>/dev/null && \
+            mv "$dylib.tmp" "$dylib" && \
+            echo "    PIL $base: $arm_arch + $x86_arch"
+    done
+fi
+
+# Generic: lipo any remaining arm64-only .so/.dylib files that have x86_64 counterparts
+# in the x86_64 Python's site-packages or lib-dynload
+for _x86_base in \
+    /usr/local/lib/python3.12/lib-dynload \
+    /usr/local/lib/python3.12/site-packages/PyQt6/Qt6/lib \
+    /usr/local/lib/python3.12/site-packages/PIL/.dylibs; do
+    [ ! -d "$_x86_base" ] && continue
+    for f in $(find dist/TrustTunnel.app/Contents/Resources/lib/python3.12 -name "*.so" -o -name "*.dylib" 2>/dev/null); do
+        [ ! -f "$f" ] && continue
+        arm_arch=$(file "$f" | grep -o 'arm64\|x86_64' | sort -u | tr '\n' '+')
+        echo "$arm_arch" | grep -q "x86_64" && continue  # already universal
+        base=$(basename "$f")
+        x86_f="$_x86_base/$base"
+        [ ! -f "$x86_f" ] && continue
+        x86_arch=$(file "$x86_f" | grep -o 'arm64\|x86_64' | head -1)
+        [ -z "$x86_arch" ] && continue
+        lipo -create "$f" "$x86_f" -output "$f.tmp" 2>/dev/null && \
+            mv "$f.tmp" "$f" && \
+            echo "    generic $base: arm64 + $x86_arch"
+    done
+done
 
 lipo -info dist/TrustTunnel.app/Contents/MacOS/TrustTunnel 2>/dev/null
 
