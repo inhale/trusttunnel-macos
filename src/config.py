@@ -3,6 +3,7 @@
 import os
 import re
 import subprocess
+import ipaddress
 from src._vendor import toml
 import base64
 from dataclasses import dataclass, field, asdict
@@ -119,6 +120,22 @@ class ServerProfile:
                 detected = _detect_egress_interface()
                 if detected:
                     tun_dict["bound_if"] = detected
+            # Exclude VPN server IPs from TUN routes so the initial connection
+            # bypasses the tunnel (avoids chicken-and-egg deadlock with 0.0.0.0/0)
+            server_ips = set()
+            for addr in self.endpoint.addresses:
+                # Extract IP from "host:port" format
+                host = addr.split(":")[0] if ":" in addr else addr
+                # Skip hostnames (not IPs) — DNS resolution needs the tunnel
+                try:
+                    ipaddress.ip_address(host)
+                    server_ips.add(host)
+                except ValueError:
+                    pass
+            if server_ips:
+                existing = set(tun_dict.get("excluded_routes", []))
+                existing.update(f"{ip}/32" for ip in server_ips)
+                tun_dict["excluded_routes"] = sorted(existing)
             cfg["listener"] = {"tun": tun_dict}
         else:
             cfg["listener"] = {"socks": asdict(self.socks)}
