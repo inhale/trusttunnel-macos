@@ -145,112 +145,94 @@ echo "=== Building .app ==="
 # Clean previous build
 rm -rf build dist dist_arm64 dist_x86_64
 
-# On Apple Silicon, try universal2 if x86_64 Python exists
+# On Apple Silicon, build arm64 then post-process for universal2
 if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
-    X86_PYTHON=""
-    for _py in /usr/local/bin/python3.12 /usr/local/bin/python3.13 /usr/local/bin/python3.11; do
-        if [ -x "$_py" ] && file "$_py" 2>/dev/null | grep -q "x86_64"; then
-            X86_PYTHON="$_py"
+    # Find x86_64 libpython on this system
+    X86_LIBPYTHON=""
+    for _d in \
+        /usr/local/Cellar/python@3.12/*/Frameworks/Python.framework/Versions/3.12/lib \
+        /usr/local/Cellar/python@3.13/*/Frameworks/Python.framework/Versions/3.13/lib \
+        /usr/local/lib \
+        /usr/local/Frameworks/Python.framework/Versions/Current/lib; do
+        if [ -f "$_d/libpython3.12.dylib" ] && file "$_d/libpython3.12.dylib" 2>/dev/null | grep -q "x86_64"; then
+            X86_LIBPYTHON="$_d/libpython3.12.dylib"
+            break
+        fi
+        if [ -f "$_d/libpython3.13.dylib" ] && file "$_d/libpython3.13.dylib" 2>/dev/null | grep -q "x86_64"; then
+            X86_LIBPYTHON="$_d/libpython3.13.dylib"
             break
         fi
     done
 
-    if [ -n "$X86_PYTHON" ]; then
-        echo "  Building universal2 (arm64 + x86_64)..."
-        echo ""
-
-        # --- arm64 build ---
-        echo "  [1/3] Building arm64..."
-        rm -rf build dist dist_arm64
-        mkdir -p dist_arm64
-        ARCHFLAGS="-arch arm64" "$PYTHON" setup.py py2app 2>&1 | tee /tmp/py2app_arm64.log
-        if [ -d "dist/TrustTunnel.app" ]; then
-            mv dist/TrustTunnel.app dist_arm64/TrustTunnel.app
-            ARM_APP="dist_arm64/TrustTunnel.app"
-            echo "        -> $(file "$ARM_APP/Contents/MacOS/TrustTunnel" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)"
-        else
-            ARM_APP=""
-            echo "        -> FAILED"
-            tail -10 /tmp/py2app_arm64.log
-            echo ""
-            echo "ARM64 BUILD FAILED — cannot continue."
-            exit 1
-        fi
-        echo ""
-
-        # --- x86_64 build ---
-        echo "  [2/3] Building x86_64..."
-        "$X86_PYTHON" -c "import py2app" 2>/dev/null || "$X86_PYTHON" -m pip install --quiet --break-system-packages py2app modulegraph 2>&1
-        "$X86_PYTHON" -c "import PIL" 2>/dev/null || "$X86_PYTHON" -m pip install --quiet --break-system-packages Pillow 2>&1
-        # Clear all py2app caches to pick up newly installed modules
-        rm -rf build .eggs
-        [ -d "$HOME/.py2app" ] && rm -rf "$HOME/.py2app"
-        mkdir -p dist_x86_64
-        ARCHFLAGS="-arch x86_64" arch -x86_64 "$X86_PYTHON" setup.py py2app 2>&1 | tee /tmp/py2app_x86_64.log
-        if [ -d "dist/TrustTunnel.app" ]; then
-            mv dist/TrustTunnel.app dist_x86_64/TrustTunnel.app
-            X86_APP="dist_x86_64/TrustTunnel.app"
-            echo "        -> $(file "$X86_APP/Contents/MacOS/TrustTunnel" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)"
-        else
-            X86_APP=""
-            echo "        -> FAILED"
-            tail -10 /tmp/py2app_x86_64.log
-            echo ""
-            echo "X86_64 BUILD FAILED — falling back to arm64 only."
-        fi
-        echo ""
-
-        # --- merge ---
-        echo "  [3/3] Merging..."
-        if [ -d "$ARM_APP" ] && [ -n "$X86_APP" ] && [ -d "$X86_APP" ]; then
-            rm -rf dist/TrustTunnel.app
-            cp -R "$ARM_APP" dist/TrustTunnel.app
-
-            lipo -create "$ARM_APP/Contents/MacOS/TrustTunnel" \
-                        "$X86_APP/Contents/MacOS/TrustTunnel" \
-                   -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel 2>/dev/null
-
-            for arm_file in $(find "$ARM_APP/Contents" \( -name "*.so" -o -name "*.dylib" \) 2>/dev/null); do
-                rel="${arm_file#$ARM_APP/Contents/}"
-                x86_file="$X86_APP/Contents/$rel"
-                out_file="dist/TrustTunnel.app/Contents/$rel"
-                [ ! -f "$x86_file" ] && continue
-                arm_arch=$(file "$arm_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
-                x86_arch=$(file "$x86_file" 2>/dev/null | grep -o 'arm64\|x86_64' | head -1)
-                if [ "$arm_arch" != "$x86_arch" ]; then
-                    mkdir -p "$(dirname "$out_file")"
-                    lipo -create "$arm_file" "$x86_file" -output "$out_file" 2>/dev/null && echo "    $rel: $arm_arch + $x86_arch -> merged"
-                fi
-            done
-
-            # Also merge the Python.framework shared library (not a .dylib/.so, so the loop above misses it)
-            ARM_PYTHON="$ARM_APP/Contents/Frameworks/Python.framework/Versions/3.12/Python"
-            X86_PYTHON="$X86_APP/Contents/Frameworks/Python.framework/Versions/3.12/Python"
-            OUT_PYTHON="dist/TrustTunnel.app/Contents/Frameworks/Python.framework/Versions/3.12/Python"
-            if [ -f "$ARM_PYTHON" ] && [ -f "$X86_PYTHON" ]; then
-                arm_arch=$(file "$ARM_PYTHON" | grep -o 'arm64\|x86_64' | head -1)
-                x86_arch=$(file "$X86_PYTHON" | grep -o 'arm64\|x86_64' | head -1)
-                if [ "$arm_arch" != "$x86_arch" ]; then
-                    lipo -create "$ARM_PYTHON" "$X86_PYTHON" -output "$OUT_PYTHON" && \
-                        echo "    Python.framework: $arm_arch + $x86_arch -> merged"
-                fi
-            fi
-
-            echo "  ✓ Universal2 binary"
-        elif [ -d "$ARM_APP" ]; then
-            rm -rf dist/TrustTunnel.app
-            cp -R "$ARM_APP" dist/TrustTunnel.app
-            echo "  → arm64 only (x86_64 build failed)"
-        else
-            echo "  ✗ FATAL: arm64 build artifact missing"
-            exit 1
-        fi
+    if [ -n "$X86_LIBPYTHON" ]; then
+        echo "  x86_64 libpython found: $X86_LIBPYTHON"
+        HAVE_X86_LIBPYTHON=1
     else
-        echo "  No x86_64 Python — building arm64 only"
-        "$PYTHON" setup.py py2app 2>&1
+        echo "  ⚠ No x86_64 libpython found — will build arm64 only"
+        HAVE_X86_LIBPYTHON=0
     fi
-else
-    "$PYTHON" setup.py py2app 2>&1
+fi
+
+# Build .app with py2app (single build using the primary Python)
+"$PYTHON" setup.py py2app 2>&1 | tee /tmp/py2app.log
+if [ ! -d "dist/TrustTunnel.app" ]; then
+    echo "  ✗ py2app build FAILED"
+    tail -20 /tmp/py2app.log
+    exit 1
+fi
+
+# Post-process: lipo Python.framework for universal2
+if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ] && [ "$HAVE_X86_LIBPYTHON" = "1" ]; then
+    APP="dist/TrustTunnel.app"
+    FW_PYTHON="$APP/Contents/Frameworks/Python.framework/Versions/3.12/Python"
+
+    # Determine py version from the framework
+    FW_VERSION_DIR=$(ls -d "$APP/Contents/Frameworks/Python.framework"/Versions/*/ 2>/dev/null | grep -v Current | head -1)
+    FW_VER=$(basename "$FW_VERSION_DIR")
+    LIBPYTHON_NAME="libpython${FW_VER}.dylib"
+
+    # Find x86_64 libpython matching the framework version
+    X86_LP=""
+    for _d in \
+        /usr/local/Cellar/python@3.12/*/Frameworks/Python.framework/Versions/3.12/lib \
+        /usr/local/Cellar/python@3.13/*/Frameworks/Python.framework/Versions/3.13/lib \
+        /usr/local/lib \
+        /usr/local/Frameworks/Python.framework/Versions/Current/lib; do
+        if [ -f "$_d/$LIBPYTHON_NAME" ] && file "$_d/$LIBPYTHON_NAME" 2>/dev/null | grep -q "x86_64"; then
+            X86_LP="$_d/$LIBPYTHON_NAME"
+            break
+        fi
+    done
+
+    if [ -n "$X86_LP" ] && [ -f "$FW_PYTHON" ]; then
+        FW_ARCH=$(file "$FW_PYTHON" | grep -o 'arm64\|x86_64' | head -1)
+        X86_ARCH=$(file "$X86_LP" | grep -o 'arm64\|x86_64' | head -1)
+        echo "  Merging Python.framework: $FW_ARCH (app) + $X86_ARCH (x86 lib)..."
+        lipo -create "$FW_PYTHON" "$X86_LP" -output "$FW_PYTHON.tmp" 2>/dev/null && \
+            mv "$FW_PYTHON.tmp" "$FW_PYTHON" && \
+            echo "  ✓ Python.framework is now universal2" || \
+            echo "  ⚠ lipo merge failed — keeping original"
+    else
+        echo "  ⚠ Could not find x86_64 Python.framework ($LIBPYTHON_NAME) — arm64 only"
+    fi
+
+    # Also merge .so and .dylib files that have x86_64 counterparts
+    for _src_dir in \
+        /usr/local/Cellar/python@3.12/*/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload \
+        /usr/local/Cellar/python@3.13/*/Frameworks/Python.framework/Versions/3.13/lib/python3.13/lib-dynload; do
+        [ ! -d "$_src_dir" ] && continue
+        for _so in "$_src_dir"/*.so "$_src_dir"/*.dylib; do
+            [ ! -f "$_so" ] && continue
+            _base=$(basename "$_so")
+            _app_so="$APP/Contents/Frameworks/Python.framework/Versions/$FW_VER/lib/python${FW_VER}/lib-dynload/$_base"
+            [ ! -f "$_app_so" ] && continue
+            _app_arch=$(file "$_app_so" | grep -o 'arm64\|x86_64' | head -1)
+            _x86_arch=$(file "$_so" | grep -o 'arm64\|x86_64' | head -1)
+            if [ "$_app_arch" != "$_x86_arch" ]; then
+                lipo -create "$_app_so" "$_so" -output "$_app_so" 2>/dev/null && echo "    merged: $_base $_app_arch+$_x86_arch"
+            fi
+        done
+    done
 fi
 
 # 6. Verify and install
