@@ -268,11 +268,24 @@ if [ -d "$APP" ]; then
         echo "  ✗ WARNING: LSUIElement NOT found in Info.plist"
     fi
 
-    # DEBUG: show what's in the bundle before our fix
-    echo "  [DEBUG] Frameworks/ contents:"
-    ls -la "$APP/Contents/Frameworks/" 2>&1 | head -5
-    echo "  [DEBUG] Looking for libpython..."
-    find "$APP" -name "libpython*" -type f 2>/dev/null | head -5
+    # Verify architectures — catch arm64-only Python.framework before release
+    echo "  [VERIFY] Mach-O architectures:"
+    MAIN_ARCH=$(file "$APP/Contents/MacOS/TrustTunnel" 2>/dev/null | grep -o 'arm64\|x86_64' | sort -u | tr '\n' '+')
+    echo "    MacOS/TrustTunnel: $MAIN_ARCH"
+    FW_PYTHON="$APP/Contents/Frameworks/Python.framework/Versions/3.12/Python"
+    if [ -f "$FW_PYTHON" ]; then
+        FW_ARCH=$(file "$FW_PYTHON" 2>/dev/null | grep -o 'arm64\|x86_64' | sort -u | tr '\n' '+')
+        echo "    Python.framework:  $FW_ARCH"
+        FW_COUNT=$(echo "$FW_ARCH" | tr '+' '\n' | grep -c 'arm64\|x86_64')
+        if [ "$FW_COUNT" -lt 2 ]; then
+            echo ""
+            echo "  ✗ FATAL: Python.framework is NOT universal2 (only $FW_ARCH) — Intel Macs will crash!"
+            echo "    The universal2 merge step missed the framework. Fix build-app-py2app.sh."
+            exit 1
+        fi
+    else
+        echo "    Python.framework:  NOT FOUND (will be bundled below)"
+    fi
 
     # Bundle Python shared library as a framework (for non-framework Pythons
     # like Homebrew where py2app doesn't auto-create the framework structure).
