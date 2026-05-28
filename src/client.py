@@ -70,6 +70,250 @@ def _get_binary_paths() -> list:
 
 CLIENT_BINARY_PATHS = _get_binary_paths()
 
+# Module-level DNS state for save/restore
+_saved_dns_service: str = ""
+_saved_dns_servers: list[str] = []
+
+
+def _find_dns_proxy_port(log_lines: list[str]) -> str:
+    """Extract the local DNS proxy port from binary log output.
+
+    The binary logs lines like:
+      System DNS proxy listening on 127.0.0.1:56255/TCP, 127.0.0.1:54920/UDP
+    We return the UDP port since that's what macOS uses for DNS.
+    """
+    import re as _re
+    for line in log_lines:
+        m = _re.search(r"127\.0\.0\.1:(\d+)/UDP", line)
+        if m:
+            return m.group(1)
+    return ""
+
+
+def _get_primary_service() -> str:
+    """Return the name of the primary active network service (e.g. 'Wi-Fi', 'Ethernet')."""
+    try:
+        result = subprocess.run(
+            ["networksetup", "-listallnetworkservices"],
+            capture_output=True, text=True, timeout=5,
+        )
+        services = [
+            s.strip() for s in result.stdout.splitlines()
+            if s.strip() and not s.strip().startswith("*")
+        ]
+        # Get the default interface to find the matching service
+        route_result = subprocess.run(
+            ["route", "-n", "get", "default"],
+            capture_output=True, text=True, timeout=3,
+        )
+        default_iface = ""
+        for line in route_result.stdout.splitlines():
+            if line.strip().startswith("interface:"):
+                default_iface = line.split(":", 1)[1].strip()
+                break
+        if default_iface:
+            # Map interface to service name
+            for svc in services:
+                try:
+                    info = subprocess.run(
+                        ["networksetup", "-getinfo", svc],
+                        capture_output=True, text=True, timeout=3,
+                    )
+                    if f"Device: {default_iface}" in info.stdout:
+                        return svc
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    # Fallback: first service
+    try:
+        result = subprocess.run(
+            ["networksetup", "-listallnetworkservices"],
+            capture_output=True, text=True, timeout=5,
+        )
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line and not line.startswith("*"):
+                return line
+    except Exception:
+        pass
+    return ""
+
+
+def _enforce_dns_through_tunnel(log_lines: list[str]) -> None:
+    """Set macOS system DNS to the tunnel's local proxy to prevent DNS leaks.
+
+    This ensures ALL DNS queries go through the VPN tunnel, not just those
+    that happen to use the system resolver. Without this, apps using DoH
+    or hard-coded DNS (Chrome, Firefox, etc.) can leak real location.
+    """
+    import re as _re
+
+    port = _find_dns_proxy_port(log_lines)
+    if not port:
+        return
+
+    dns_proxy = f"127.0.0.1"
+
+    # Get primary network service
+    service = _get_primary_service()
+    if not service:
+        return
+
+    try:
+        # Save current DNS settings for restore on disconnect
+        current = subprocess.run(
+            ["networksetup", "-getdnsservers", service],
+            capture_output=True, text=True, timeout=5,
+        )
+        # Store in the last connect log for the ClientManager to pick up
+        # (we don't have direct access to self here, so we use a module-level)
+        _saved_dns_service = service
+        _saved_dns_servers = [
+            s.strip() for s in current.stdout.splitlines()
+            if s.strip() and s.strip() != "There aren't any DNS Servers set on"
+        ]
+        if not _saved_dns_servers:
+            _saved_dns_servers = ["empty"]
+
+        # Set system DNS to the tunnel's local proxy only
+        subprocess.run(
+            ["networksetup", "-setdnsservers", service, dns_proxy],
+            capture_output=True, text=True, timeout=5,
+        )
+        # Verify
+        verify = subprocess.run(
+            ["networksetup", "-getdnsservers", service],
+            capture_output=True, text=True, timeout=5,
+        )
+        if dns_proxy in verify.stdout:
+            log_lines.append(
+                f"[{_ts()}] DNS locked to tunnel proxy ({dns_proxy}:{port}) on '{service}'"
+            )
+        else:
+            log_lines.append(
+                f"[{_ts()}] WARNING: DNS set may not have taken effect on '{service}'"
+            )
+    except Exception as e:
+        log_lines.append(f"[{_ts()}] WARNING: failed to set system DNS: {e}")
+
+    # Also block DNS-over-TLS (port 853) and common DoH endpoints
+    # to prevent apps from bypassing the local proxy
+    _block_outside_dns(log_lines)
+
+
+def _block_outside_dns(log_lines: list[str]) -> None:
+    """Add pf rules to force all DNS through the tunnel proxy.
+
+    This blocks:
+    - Plain DNS (port 53) to any non-local address
+    - DNS-over-TLS (port 853) to any non-local address
+    - Common DoH IPs (Google 8.8.8.8, Cloudflare 1.1.1.1, etc.)
+    
+    All DNS is redirected to 127.0.0.1 which is the tunnel's local proxy.
+    """
+    import re as _re
+
+    # Find the DNS proxy UDP port from log lines
+    port = _find_dns_proxy_port(log_lines)
+    if not port:
+        return
+
+    # Build pf anchor rules
+    pf_rules = f"""
+# TrustTunnel DNS leak prevention
+# Block all DNS outside tunnel, redirect to local proxy
+
+# Allow local proxy
+pass quick on lo0 proto udp from any to 127.0.0.1 port {port}
+pass quick on lo0 proto tcp from any to 127.0.0.1 port {int(port) + 1}
+
+# Block plain DNS (port 53) to non-local
+block drop out proto udp from any to any port 53
+block drop out proto tcp from any to any port 53
+
+# Block DNS-over-TLS (port 853)
+block drop out proto tcp from any to any port 853
+
+# Block known DoH endpoints (redirect through tunnel)
+# Google DNS DoH
+block drop out proto tcp from any to 8.8.8.8 port 443
+block drop out proto tcp from any to 8.8.4.4 port 443
+# Cloudflare DoH
+block drop out proto tcp from any to 1.1.1.1 port 443
+block drop out proto tcp from any to 1.0.0.1 port 443
+# Quad9 DoH
+block drop out proto tcp from any to 9.9.9.9 port 443
+block drop out proto tcp from any to 149.112.112.112 port 443
+# AdGuard DoH
+block drop out proto tcp from any to 94.140.14.14 port 443
+block drop out proto tcp from any to 94.140.15.15 port 443
+"""
+
+    # Write to a temp anchor file
+    anchor_file = os.path.join(tempfile.gettempdir(), "tt_dns_anchor.conf")
+    try:
+        with open(anchor_file, "w") as f:
+            f.write(pf_rules)
+
+        # Load the anchor (requires root, so use sudo)
+        result = subprocess.run(
+            ["sudo", "-n", "pfctl", "-a", "com.trusttunnel.dns", "-f", anchor_file],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode == 0:
+            # Enable pf if not already enabled
+            subprocess.run(
+                ["sudo", "-n", "pfctl", "-e"],
+                capture_output=True, text=True, timeout=5,
+            )
+            log_lines.append(
+                f"[{_ts()}] DNS leak prevention: blocked outside DNS (port 53, 853, DoH)"
+            )
+        else:
+            # pfctl failed — log but don't block the connection
+            log_lines.append(
+                f"[{_ts()}] WARNING: could not load pf DNS rules "
+                f"(DNS leak prevention may be incomplete): {result.stderr.strip()}"
+            )
+    except Exception as e:
+        log_lines.append(f"[{_ts()}] WARNING: DNS pf rules failed: {e}")
+
+
+def _restore_dns(log_lines: list[str]) -> None:
+    """Restore original DNS settings after VPN disconnect."""
+    global _saved_dns_service, _saved_dns_servers
+    if not _saved_dns_service:
+        return
+    try:
+        if _saved_dns_servers == ["empty"]:
+            subprocess.run(
+                ["networksetup", "-setdnsservers", _saved_dns_service, "Empty"],
+                capture_output=True, text=True, timeout=5,
+            )
+        else:
+            subprocess.run(
+                ["networksetup", "-setdnsservers", _saved_dns_service] + _saved_dns_servers,
+                capture_output=True, text=True, timeout=5,
+            )
+        log_lines.append(
+            f"[{_ts()}] DNS restored on '{_saved_dns_service}': {_saved_dns_servers}"
+        )
+    except Exception as e:
+        log_lines.append(f"[{_ts()}] WARNING: failed to restore DNS: {e}")
+    finally:
+        _saved_dns_service = ""
+        _saved_dns_servers = []
+
+    # Remove pf DNS anchor
+    try:
+        subprocess.run(
+            ["sudo", "-n", "pfctl", "-a", "com.trusttunnel.dns", "-F", "all"],
+            capture_output=True, text=True, timeout=5,
+        )
+    except Exception:
+        pass
+
 
 def _detect_competing_vpn() -> list[str]:
     """Detect existing VPN interfaces and routes that may conflict with TrustTunnel.
@@ -206,7 +450,9 @@ class ClientManager:
         self._reader_thread: Optional[Thread] = None
         self._config_path: Optional[str] = None
         self._last_connect_log: list[str] = []
-
+        # Saved DNS settings for restore on disconnect
+        self._saved_dns_service: str = ""
+        self._saved_dns_servers: list[str] = []
     @property
     def status(self) -> ClientStatus:
         with self._lock:
@@ -578,6 +824,8 @@ class ClientManager:
                         if self._status.state == ClientState.CONNECTING:
                             self._status.state = ClientState.CONNECTED
                             self._status.phase = ConnectPhase.TUNNEL_UP
+                    # Force system DNS through the tunnel to prevent leaks
+                    _enforce_dns_through_tunnel(self._status.log_lines)
                     self._notify()
         except Exception:
             pass
@@ -602,6 +850,9 @@ class ClientManager:
             except Exception:
                 pass
         self._config_path = None
+
+        # Restore original DNS settings
+        _restore_dns(self._status.log_lines)
 
         self._start_time = 0.0
         with self._lock:

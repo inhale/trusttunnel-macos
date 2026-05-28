@@ -89,6 +89,11 @@ class ServerProfile:
 
     def to_client_toml(self) -> str:
         """Generate a valid trusttunnel_client TOML config string."""
+        # DNS strategy: if server provides DNS upstreams, use them;
+        # otherwise default to tunnel's own DNS proxy (127.0.0.1)
+        # to prevent DNS leaks. The binary runs a local DNS proxy on
+        # 127.0.0.1 that forwards through the tunnel.
+        dns_upstreams = self.endpoint.dns_upstreams or []
         cfg = {
             "loglevel": self.loglevel,
             "vpn_mode": self.vpn_mode,
@@ -96,7 +101,7 @@ class ServerProfile:
             "killswitch_allow_ports": self.killswitch_allow_ports,
             "post_quantum_group_enabled": self.post_quantum_group_enabled,
             "exclusions": self.exclusions,
-            "dns_upstreams": self.endpoint.dns_upstreams or ["1.1.1.1", "8.8.8.8"],
+            "dns_upstreams": dns_upstreams,
         }
         cfg["endpoint"] = {
             "hostname": self.endpoint.hostname,
