@@ -222,6 +222,20 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
                     lipo -create "$arm_file" "$x86_file" -output "$out_file" 2>/dev/null && echo "    $rel: $arm_arch + $x86_arch -> merged"
                 fi
             done
+
+            # Also merge the Python.framework shared library (not a .dylib/.so, so the loop above misses it)
+            ARM_PYTHON="$ARM_APP/Contents/Frameworks/Python.framework/Versions/3.12/Python"
+            X86_PYTHON="$X86_APP/Contents/Frameworks/Python.framework/Versions/3.12/Python"
+            OUT_PYTHON="dist/TrustTunnel.app/Contents/Frameworks/Python.framework/Versions/3.12/Python"
+            if [ -f "$ARM_PYTHON" ] && [ -f "$X86_PYTHON" ]; then
+                arm_arch=$(file "$ARM_PYTHON" | grep -o 'arm64\|x86_64' | head -1)
+                x86_arch=$(file "$X86_PYTHON" | grep -o 'arm64\|x86_64' | head -1)
+                if [ "$arm_arch" != "$x86_arch" ]; then
+                    lipo -create "$ARM_PYTHON" "$X86_PYTHON" -output "$OUT_PYTHON" && \
+                        echo "    Python.framework: $arm_arch + $x86_arch -> merged"
+                fi
+            fi
+
             echo "  ✓ Universal2 binary"
         elif [ -d "$ARM_APP" ]; then
             rm -rf dist/TrustTunnel.app
