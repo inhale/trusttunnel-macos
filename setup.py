@@ -38,7 +38,7 @@ OPTIONS = {
         "PyRuntimeLocations": [
             "@executable_path/../Frameworks/Python"
         ],
-        "LSUIElement": True,  # Hide Dock icon — app runs as UI element (tray only)
+        # Dock icon visible — normal app activation policy
     },
 }
 

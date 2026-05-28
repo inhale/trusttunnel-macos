@@ -786,7 +786,7 @@ class TrustTunnelWindow:
     # ── Tray icon ─────────────────────────────────────────────────────
 
     def _update_tray_icon(self, state: ClientState):
-        from PyQt6.QtGui import QPixmap, QPainter, QPen, QColor
+        from PyQt6.QtGui import QPixmap, QPainter, QColor
         from PyQt6.QtCore import Qt
 
         pm = QPixmap(16, 16)
@@ -796,31 +796,15 @@ class TrustTunnelWindow:
 
         cx, cy = 8, 8
 
-        # Status color for the accretion ring
+        # Simple filled circle: grey when disconnected, white when connected
         if state == ClientState.CONNECTED:
-            ring_color = QColor(78, 201, 176)    # green
-        elif state in (ClientState.CONNECTING, ClientState.CHECKING):
-            ring_color = QColor(204, 167, 0)      # yellow
-        elif state == ClientState.ERROR:
-            ring_color = QColor(244, 71, 71)      # red
+            circle_color = QColor(255, 255, 255)  # white
         else:
-            ring_color = QColor(100, 100, 100)    # grey
+            circle_color = QColor(128, 128, 128)  # grey
 
-        # Outer glow ring (thin)
-        glow = QColor(ring_color)
-        glow.setAlpha(80)
-        painter.setPen(QPen(glow, 1))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawEllipse(cx - 6, cy - 6, 12, 12)
-
-        # Accretion ring (elliptical, tilted)
-        painter.setPen(QPen(ring_color, 1))
-        painter.drawEllipse(cx - 4, cy - 3, 8, 6)
-
-        # Event horizon (black center)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0))
-        painter.drawEllipse(cx - 2, cy - 2, 4, 4)
+        painter.setBrush(circle_color)
+        painter.drawEllipse(cx - 4, cy - 4, 8, 8)
 
         painter.end()
 
@@ -963,23 +947,48 @@ def main():
     app.setStyle("Fusion")
 
     app.setStyleSheet("""
+        * {
+            background-color: #2c2c2c;
+            color: #d4d4d4;
+            border: none;
+        }
         QMainWindow { background: #2c2c2c; }
         QWidget { background: #2c2c2c; color: #d4d4d4; }
-        QTabWidget::pane { border: none; }
-        QTabBar::tab { background: #383838; color: #d4d4d4; padding: 6px 16px; }
-        QTabBar::tab:selected { background: #2c2c2c; }
-        QTableWidget { background: #262626; border: none; gridline-color: #383838; }
-        QTableWidget::item { padding: 4px; }
-        QTableWidget::item:selected { background: #0078d4; color: white; }
-        QHeaderView::section { background: #444; color: #d4d4d4; border: none; padding: 4px 8px; font-weight: bold; }
+        QFrame { background: #2c2c2c; border: none; }
+        QTabWidget::pane { border: none; background: #2c2c2c; }
+        QTabBar::tab { background: #383838; color: #d4d4d4; padding: 6px 16px; border: none; }
+        QTabBar::tab:selected { background: #2c2c2c; border: none; }
+        QTabBar::tab:!selected { background: #383838; border: none; }
+        QTabBar::tab:hover { background: #444; }
+        QTableWidget { background: #262626; border: none; gridline-color: #333; }
+        QTableWidget::item { padding: 4px; border: none; }
+        QTableWidget::item:selected { background: #0078d4; color: white; border: none; }
+        QTableWidget::item:hover { background: #333; }
+        QHeaderView::section { background: #3a3a3a; color: #d4d4d4; border: none; padding: 4px 8px; font-weight: bold; }
+        QHeaderView::section:hover { background: #444; }
         QTextEdit { background: #1f1f1f; color: #a0a0a0; border: none; }
         QLineEdit { background: #262626; color: #e0e0e0; border: 1px solid #444; padding: 4px; }
         QPushButton { background: #444; color: #d4d4d4; border: none; padding: 4px 12px; }
-        QPushButton:hover { background: #505050; }
+        QPushButton:hover { background: #555; }
         QPushButton:pressed { background: #383838; }
+        QPushButton:disabled { background: #333; color: #666; }
         QDialog { background: #303030; }
-        QLabel { color: #d4d4d4; }
-        QStatusBar { background: #303030; }
+        QLabel { color: #d4d4d4; background: transparent; }
+        QStatusBar { background: #2c2c2c; }
+        QMenuBar { background: #2c2c2c; color: #d4d4d4; }
+        QMenuBar::item:selected { background: #444; }
+        QMenu { background: #2c2c2c; color: #d4d4d4; }
+        QMenu::item:selected { background: #0078d4; }
+        QComboBox { background: #262626; color: #e0e0e0; border: 1px solid #444; }
+        QComboBox::drop-down { border: none; }
+        QComboBox QAbstractItemView { background: #2c2c2c; color: #d4d4d4; }
+        QCheckBox { color: #d4d4d4; }
+        QScrollBar:vertical { background: #2c2c2c; }
+        QScrollBar:horizontal { background: #2c2c2c; }
+        QSplitter::handle { background: #383838; }
+        QToolBar { background: #2c2c2c; border: none; }
+        QToolButton { background: transparent; border: none; }
+        QToolButton:hover { background: #444; }
     """)
 
     window = TrustTunnelWindow(app)
