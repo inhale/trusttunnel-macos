@@ -64,6 +64,7 @@ class TunConfig:
     tcp_send_buf_size: int = 0
     change_system_dns: bool = True
     device_name: str = ""
+    allow_ipv6: bool = True
     dns_blocklist: list[str] = field(default_factory=lambda: [
         "8.8.8.8", "8.8.4.4",
         "1.1.1.1", "1.0.0.1",
@@ -131,6 +132,12 @@ class ServerProfile:
                 detected = _detect_egress_interface()
                 if detected:
                     tun_dict["bound_if"] = detected
+            # Filter IPv6 routes based on allow_ipv6 setting
+            if not self.tun.allow_ipv6:
+                tun_dict["included_routes"] = [
+                    r for r in tun_dict.get("included_routes", [])
+                    if ":" not in r
+                ]
             # Exclude VPN server IPs from TUN routes so the initial connection
             # bypasses the tunnel (avoids chicken-and-egg deadlock with 0.0.0.0/0)
             server_ips = set()
@@ -323,6 +330,7 @@ def load_servers() -> list[ServerProfile]:
                 tcp_send_buf_size=tun_data.get("tcp_send_buf_size", 0),
                 change_system_dns=tun_data.get("change_system_dns", True),
                 device_name=tun_data.get("device_name", ""),
+                allow_ipv6=tun_data.get("allow_ipv6", True),
                 dns_blocklist=tun_data.get("dns_blocklist", []),
             )
             socks_data = s.get("socks", {})

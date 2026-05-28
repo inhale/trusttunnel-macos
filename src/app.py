@@ -111,13 +111,25 @@ class AddEditDialog:
 
         dns_block_edit = QTextEdit()
         dns_block_edit.setPlaceholderText(
-            "DNS servers to block (one IP per line).\n"
-            "These are blocked via pf to prevent DNS leaks.\n"
-            "Default: Google, Cloudflare, Quad9, AdGuard DoH IPs."
+            "DoH/DoT server IPs to block via pf firewall (one per line).\n"
+            "This blocks DNS-over-HTTPS (port 443) to these IPs, forcing\n"
+            "all DNS through the tunnel proxy.\n"
+            "Leave empty to auto-block known DoH providers.\n"
+            "Example: 8.8.8.8, 1.1.1.1"
         )
         dns_block_edit.setMaximumHeight(100)
         self._entries["dns_blocklist"] = dns_block_edit
         layout.addRow("DNS Blocklist:", dns_block_edit)
+
+        ipv6_check = QCheckBox("Allow IPv6")
+        ipv6_check.setChecked(True)
+        ipv6_check.setToolTip(
+            "When checked, IPv6 traffic is routed through the tunnel.\n"
+            "Uncheck to disable IPv6 and route IPv4 only.\n"
+            "Useful when the VPN server or network doesn't support IPv6 properly."
+        )
+        self._entries["allow_ipv6"] = ipv6_check
+        layout.addRow("", ipv6_check)
 
         if self._profile:
             ep = self._profile.endpoint
@@ -131,6 +143,7 @@ class AddEditDialog:
                 cert_edit.setPlainText(ep.certificate)
             if self._profile.tun.dns_blocklist:
                 dns_block_edit.setPlainText("\n".join(self._profile.tun.dns_blocklist))
+            ipv6_check.setChecked(self._profile.tun.allow_ipv6)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -175,6 +188,7 @@ class AddEditDialog:
         self.result = ServerProfile(name=name, endpoint=ep)
         self.result.tun.bound_if = bound_if
         self.result.tun.dns_blocklist = dns_blocklist
+        self.result.tun.allow_ipv6 = self._entries["allow_ipv6"].isChecked()
         self._dlg.accept()
 
     def exec(self):

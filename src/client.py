@@ -146,14 +146,44 @@ def _enforce_dns_through_tunnel(log_lines: list[str], dns_blocklist: list[str] =
     This ensures ALL DNS queries go through the VPN tunnel, not just those
     that happen to use the system resolver. Without this, apps using DoH
     or hard-coded DNS (Chrome, Firefox, etc.) can leak real location.
+
+    Falls back to Quad9 (9.9.9.9 / 149.112.112.112) if the local DNS proxy
+    is not responding, ensuring DNS always goes through the tunnel.
     """
     import re as _re
+    import socket as _socket
+
+    # Fallback DNS servers used when the local proxy is not responding
+    _FALLBACK_DNS = ["9.9.9.9", "149.112.112.112"]
+
+    def _dns_proxy_responds(host: str, port: int, timeout: float = 2.0) -> bool:
+        """Check if the DNS proxy actually responds to queries."""
+        try:
+            sock = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            # Minimal DNS A-query for "google.com" (standard query header + question)
+            # Header: ID=0x0001, flags=0x0100 (standard query, recursion desired),
+            #         QDCOUNT=1, ANCOUNT=0, NSCOUNT=0, ARCOUNT=0
+            # Question: google.com (labels: 6,"google",3,"com",0), type A, class IN
+            query = (
+                b"\x00\x01"  # ID
+                b"\x01\x00"  # flags: RD=1
+                b"\x00\x01"  # QDCOUNT
+                b"\x00\x00"  # ANCOUNT
+                b"\x00\x00"  # NSCOUNT
+                b"\x00\x00"  # ARCOUNT
+                b"\x06google\x03com\x00"  # QNAME: google.com
+                b"\x00\x01"  # QTYPE: A
+                b"\x00\x01"  # QCLASS: IN
+            )
+            sock.sendto(query, (host, port))
+            data, _ = sock.recvfrom(512)
+            sock.close()
+            return len(data) > 0
+        except Exception:
+            return False
 
     port = _find_dns_proxy_port(log_lines)
-    if not port:
-        return
-
-    dns_proxy = f"127.0.0.1"
 
     # Get primary network service
     service = _get_primary_service()
@@ -175,9 +205,30 @@ def _enforce_dns_through_tunnel(log_lines: list[str], dns_blocklist: list[str] =
         if not _saved_dns_servers:
             _saved_dns_servers = ["empty"]
 
-        # Set system DNS to the tunnel's local proxy only
+        chosen_dns = None
+        chosen_label = None
+
+        # Try the local DNS proxy first
+        if port and _dns_proxy_responds("127.0.0.1", int(port)):
+            chosen_dns = ["127.0.0.1"]
+            chosen_label = f"tunnel proxy (127.0.0.1:{port})"
+        else:
+            if port:
+                log_lines.append(
+                    f"[{_ts()}] DNS proxy on 127.0.0.1:{port} not responding, "
+                    f"falling back to Quad9"
+                )
+            else:
+                log_lines.append(
+                    f"[{_ts()}] No DNS proxy found in log, falling back to Quad9"
+                )
+            # Fall back to Quad9 — will be forced through the tunnel by pf rules
+            chosen_dns = _FALLBACK_DNS
+            chosen_label = f"Quad9 ({', '.join(_FALLBACK_DNS)})"
+
+        # Set system DNS
         subprocess.run(
-            ["networksetup", "-setdnsservers", service, dns_proxy],
+            ["networksetup", "-setdnsservers", service] + chosen_dns,
             capture_output=True, text=True, timeout=5,
         )
         # Verify
@@ -185,16 +236,22 @@ def _enforce_dns_through_tunnel(log_lines: list[str], dns_blocklist: list[str] =
             ["networksetup", "-getdnsservers", service],
             capture_output=True, text=True, timeout=5,
         )
-        if dns_proxy in verify.stdout:
+        if chosen_dns[0] in verify.stdout:
             log_lines.append(
-                f"[{_ts()}] DNS locked to tunnel proxy ({dns_proxy}:{port}) on '{service}'"
+                f"[{_ts()}] DNS locked to {chosen_label} on '{service}'"
             )
         else:
             log_lines.append(
                 f"[{_ts()}] WARNING: DNS set may not have taken effect on '{service}'"
             )
+            log_lines.append(
+                f"[{_ts()}] WARNING: DNS leak may be possible — check manually"
+            )
     except Exception as e:
         log_lines.append(f"[{_ts()}] WARNING: failed to set system DNS: {e}")
+        log_lines.append(
+            f"[{_ts()}] WARNING: DNS leak may be possible — check manually"
+        )
 
     # Also block DNS-over-TLS (port 853) and DoH endpoints
     _block_outside_dns(log_lines, dns_blocklist)
