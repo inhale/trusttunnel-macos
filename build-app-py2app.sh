@@ -145,9 +145,17 @@ echo "=== Building .app ==="
 # Clean previous build
 rm -rf build dist dist_arm64 dist_x86_64
 
-# On Apple Silicon, build arm64 then post-process for universal2
+# On Apple Silicon, build universal2
 if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
-    # Find x86_64 libpython on this system
+    # Find x86_64 Python and libpython
+    X86_PYTHON=""
+    for _py in /usr/local/bin/python3.12 /usr/local/bin/python3.13 /usr/local/bin/python3.11; do
+        if [ -x "$_py" ] && file "$_py" 2>/dev/null | grep -q "x86_64"; then
+            X86_PYTHON="$_py"
+            break
+        fi
+    done
+
     X86_LIBPYTHON=""
     for _d in \
         /usr/local/Cellar/python@3.12/*/Frameworks/Python.framework/Versions/3.12/lib \
@@ -164,76 +172,101 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         fi
     done
 
-    if [ -n "$X86_LIBPYTHON" ]; then
-        echo "  x86_64 libpython found: $X86_LIBPYTHON"
-        HAVE_X86_LIBPYTHON=1
+    HAVE_X86=0
+    if [ -n "$X86_PYTHON" ] && [ -n "$X86_LIBPYTHON" ]; then
+        echo "  x86_64 Python found: $X86_PYTHON"
+        HAVE_X86=1
     else
-        echo "  ⚠ No x86_64 libpython found — will build arm64 only"
-        HAVE_X86_LIBPYTHON=0
+        echo "  ⚠ No x86_64 Python — will build arm64 only"
     fi
 fi
 
-# Build .app with py2app (single build using the primary Python)
-"$PYTHON" setup.py py2app 2>&1 | tee /tmp/py2app.log
+# --- arm64 build ---
+echo "  [1/3] Building arm64..."
+rm -rf build dist dist_arm64
+mkdir -p dist_arm64
+ARCHFLAGS="-arch arm64" "$PYTHON" setup.py py2app 2>&1 | tee /tmp/py2app_arm64.log
 if [ ! -d "dist/TrustTunnel.app" ]; then
-    echo "  ✗ py2app build FAILED"
-    tail -20 /tmp/py2app.log
+    echo "  ✗ ARM64 BUILD FAILED"
+    tail -20 /tmp/py2app_arm64.log
     exit 1
 fi
+mv dist/TrustTunnel.app dist_arm64/TrustTunnel.app
+echo "        -> $(file dist_arm64/TrustTunnel.app/Contents/MacOS/TrustTunnel | grep -o 'arm64\|x86_64' | head -1)"
 
-# Post-process: lipo Python.framework for universal2
-if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ] && [ "$HAVE_X86_LIBPYTHON" = "1" ]; then
-    APP="dist/TrustTunnel.app"
-    FW_PYTHON="$APP/Contents/Frameworks/Python.framework/Versions/3.12/Python"
-
-    # Determine py version from the framework
-    FW_VERSION_DIR=$(ls -d "$APP/Contents/Frameworks/Python.framework"/Versions/*/ 2>/dev/null | grep -v Current | head -1)
-    FW_VER=$(basename "$FW_VERSION_DIR")
-    LIBPYTHON_NAME="libpython${FW_VER}.dylib"
-
-    # Find x86_64 libpython matching the framework version
-    X86_LP=""
-    for _d in \
-        /usr/local/Cellar/python@3.12/*/Frameworks/Python.framework/Versions/3.12/lib \
-        /usr/local/Cellar/python@3.13/*/Frameworks/Python.framework/Versions/3.13/lib \
-        /usr/local/lib \
-        /usr/local/Frameworks/Python.framework/Versions/Current/lib; do
-        if [ -f "$_d/$LIBPYTHON_NAME" ] && file "$_d/$LIBPYTHON_NAME" 2>/dev/null | grep -q "x86_64"; then
-            X86_LP="$_d/$LIBPYTHON_NAME"
-            break
-        fi
-    done
-
-    if [ -n "$X86_LP" ] && [ -f "$FW_PYTHON" ]; then
-        FW_ARCH=$(file "$FW_PYTHON" | grep -o 'arm64\|x86_64' | head -1)
-        X86_ARCH=$(file "$X86_LP" | grep -o 'arm64\|x86_64' | head -1)
-        echo "  Merging Python.framework: $FW_ARCH (app) + $X86_ARCH (x86 lib)..."
-        lipo -create "$FW_PYTHON" "$X86_LP" -output "$FW_PYTHON.tmp" 2>/dev/null && \
-            mv "$FW_PYTHON.tmp" "$FW_PYTHON" && \
-            echo "  ✓ Python.framework is now universal2" || \
-            echo "  ⚠ lipo merge failed — keeping original"
+# --- x86_64 build ---
+X86_APP=""
+if [ "$HAVE_X86" = "1" ]; then
+    echo "  [2/3] Building x86_64..."
+    "$X86_PYTHON" -c "import py2app" 2>/dev/null || "$X86_PYTHON" -m pip install --quiet --break-system-packages py2app modulegraph 2>&1
+    "$X86_PYTHON" -c "import PIL" 2>/dev/null || "$X86_PYTHON" -m pip install --quiet --break-system-packages Pillow 2>&1
+    rm -rf build .eggs
+    [ -d "$HOME/.py2app" ] && rm -rf "$HOME/.py2app"
+    mkdir -p dist_x86_64
+    ARCHFLAGS="-arch x86_64" arch -x86_64 "$X86_PYTHON" setup.py py2app 2>&1 | tee /tmp/py2app_x86_64.log
+    if [ -d "dist/TrustTunnel.app" ]; then
+        mv dist/TrustTunnel.app dist_x86_64/TrustTunnel.app
+        X86_APP="dist_x86_64/TrustTunnel.app"
+        echo "        -> $(file $X86_APP/Contents/MacOS/TrustTunnel | grep -o 'arm64\|x86_64' | head -1)"
     else
-        echo "  ⚠ Could not find x86_64 Python.framework ($LIBPYTHON_NAME) — arm64 only"
+        echo "        -> FAILED (non-fatal, will use arm64 main binary)"
+        tail -5 /tmp/py2app_x86_64.log
     fi
+fi
 
-    # Also merge .so and .dylib files that have x86_64 counterparts
-    for _src_dir in \
-        /usr/local/Cellar/python@3.12/*/Frameworks/Python.framework/Versions/3.12/lib/python3.12/lib-dynload \
-        /usr/local/Cellar/python@3.13/*/Frameworks/Python.framework/Versions/3.13/lib/python3.13/lib-dynload; do
-        [ ! -d "$_src_dir" ] && continue
-        for _so in "$_src_dir"/*.so "$_src_dir"/*.dylib; do
-            [ ! -f "$_so" ] && continue
-            _base=$(basename "$_so")
-            _app_so="$APP/Contents/Frameworks/Python.framework/Versions/$FW_VER/lib/python${FW_VER}/lib-dynload/$_base"
-            [ ! -f "$_app_so" ] && continue
-            _app_arch=$(file "$_app_so" | grep -o 'arm64\|x86_64' | head -1)
-            _x86_arch=$(file "$_so" | grep -o 'arm64\|x86_64' | head -1)
-            if [ "$_app_arch" != "$_x86_arch" ]; then
-                lipo -create "$_app_so" "$_so" -output "$_app_so" 2>/dev/null && echo "    merged: $_base $_app_arch+$_x86_arch"
-            fi
-        done
+# --- merge ---
+echo "  [3/3] Merging universal2..."
+rm -rf dist/TrustTunnel.app
+cp -R dist_arm64/TrustTunnel.app dist/TrustTunnel.app
+
+# lipo main binary
+if [ -n "$X86_APP" ] && [ -f "$X86_APP/Contents/MacOS/TrustTunnel" ]; then
+    lipo -create dist_arm64/TrustTunnel.app/Contents/MacOS/TrustTunnel \
+                "$X86_APP/Contents/MacOS/TrustTunnel" \
+           -output dist/TrustTunnel.app/Contents/MacOS/TrustTunnel 2>/dev/null && \
+        echo "  ✓ Main binary: arm64 + x86_64"
+else
+    echo "  → Main binary: arm64 only (x86_64 build failed)"
+fi
+
+# lipo python interpreter
+if [ -n "$X86_APP" ] && [ -f "$X86_APP/Contents/MacOS/python" ]; then
+    lipo -create dist_arm64/TrustTunnel.app/Contents/MacOS/python \
+                "$X86_APP/Contents/MacOS/python" \
+           -output dist/TrustTunnel.app/Contents/MacOS/python 2>/dev/null && \
+        echo "  ✓ Python interpreter: arm64 + x86_64"
+fi
+
+# lipo Python.framework
+ARM_FW="dist_arm64/TrustTunnel.app/Contents/Frameworks/Python.framework/Versions/3.12/Python"
+if [ -f "$ARM_FW" ] && [ -n "$X86_LIBPYTHON" ]; then
+    FW_ARCH=$(file "$ARM_FW" | grep -o 'arm64\|x86_64' | head -1)
+    X86_ARCH=$(file "$X86_LIBPYTHON" | grep -o 'arm64\|x86_64' | head -1)
+    if [ "$FW_ARCH" != "$X86_ARCH" ]; then
+        lipo -create "$ARM_FW" "$X86_LIBPYTHON" \
+               -output dist/TrustTunnel.app/Contents/Frameworks/Python.framework/Versions/3.12/Python.tmp 2>/dev/null && \
+            mv dist/TrustTunnel.app/Contents/Frameworks/Python.framework/Versions/3.12/Python.tmp \
+               dist/TrustTunnel.app/Contents/Frameworks/Python.framework/Versions/3.12/Python && \
+            echo "  ✓ Python.framework: $FW_ARCH + $X86_ARCH"
+    fi
+fi
+
+# lipo .so and .dylib files
+if [ -n "$X86_APP" ]; then
+    for f in $(find dist_arm64/TrustTunnel.app/Contents -name "*.so" -o -name "*.dylib" 2>/dev/null); do
+        rel="${f#dist_arm64/TrustTunnel.app/Contents/}"
+        x86_f="$X86_APP/Contents/$rel"
+        out="dist/TrustTunnel.app/Contents/$rel"
+        [ ! -f "$x86_f" ] && continue
+        a_arch=$(file "$f" | grep -o 'arm64\|x86_64' | head -1)
+        x_arch=$(file "$x86_f" | grep -o 'arm64\|x86_64' | head -1)
+        [ "$a_arch" = "$x_arch" ] && continue
+        mkdir -p "$(dirname "$out")"
+        lipo -create "$f" "$x86_f" -output "$out" 2>/dev/null && echo "    merged: $rel"
     done
 fi
+
+lipo -info dist/TrustTunnel.app/Contents/MacOS/TrustTunnel 2>/dev/null
 
 # 6. Verify and install
 APP="dist/TrustTunnel.app"
