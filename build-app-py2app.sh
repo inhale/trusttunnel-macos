@@ -172,12 +172,26 @@ if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
         fi
     done
 
+    # Find x86_64 Qt6 (needed for lipo merge)
+    X86_QT6=""
+    for _d in /usr/local/Cellar/qt@6/*/lib /usr/local/opt/qt@6/lib /usr/local/lib; do
+        if [ -f "$_d/QtCore.framework/Versions/A/QtCore" ] && file "$_d/QtCore.framework/Versions/A/QtCore" 2>/dev/null | grep -q "x86_64"; then
+            X86_QT6="$_d"
+            break
+        fi
+    done
+
     HAVE_X86=0
     if [ -n "$X86_PYTHON" ] && [ -n "$X86_LIBPYTHON" ]; then
         echo "  x86_64 Python found: $X86_PYTHON"
         HAVE_X86=1
     else
         echo "  ⚠ No x86_64 Python — will build arm64 only"
+    fi
+    if [ -n "$X86_QT6" ]; then
+        echo "  x86_64 Qt6 found: $X86_QT6"
+    else
+        echo "  ⚠ No x86_64 Qt6 — install with: arch -x86_64 /usr/local/bin/brew install qt@6"
     fi
 fi
 
@@ -264,6 +278,30 @@ if [ -n "$X86_APP" ]; then
         mkdir -p "$(dirname "$out")"
         lipo -create "$f" "$x86_f" -output "$out" 2>/dev/null && echo "    merged: $rel"
     done
+fi
+
+# lipo Qt frameworks (arm64 from app, x86_64 from system Qt)
+echo "  Merging Qt frameworks..."
+QT6_ARM="/opt/homebrew/opt/qt@6/lib"
+
+if [ -n "$X86_QT6" ] && [ -d "$QT6_ARM" ]; then
+    APP_QT="dist/TrustTunnel.app/Contents/Resources/lib/python3.12/PyQt6/Qt6/lib"
+    for fw in "$APP_QT"/*.framework; do
+        [ ! -d "$fw" ] && continue
+        fw_name=$(basename "$fw" .framework)
+        arm_bin="$fw/Versions/A/$fw_name"
+        x86_bin="$X86_QT6/$fw_name.framework/Versions/A/$fw_name"
+        [ ! -f "$arm_bin" ] && continue
+        [ ! -f "$x86_bin" ] && continue
+        arm_arch=$(file "$arm_bin" | grep -o 'arm64\|x86_64' | head -1)
+        x86_arch=$(file "$x86_bin" | grep -o 'arm64\|x86_64' | head -1)
+        [ "$arm_arch" = "$x86_arch" ] && continue
+        lipo -create "$arm_bin" "$x86_bin" -output "$arm_bin.tmp" 2>/dev/null && \
+            mv "$arm_bin.tmp" "$arm_bin" && \
+            echo "    Qt $fw_name: $arm_arch + $x86_arch"
+    done
+else
+    echo "  ⚠ No x86_64 Qt found — Qt frameworks will be arm64 only"
 fi
 
 lipo -info dist/TrustTunnel.app/Contents/MacOS/TrustTunnel 2>/dev/null
