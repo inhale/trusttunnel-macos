@@ -5,11 +5,10 @@
 
 set -euo pipefail
 
-# The binary always lands in Contents/Resources/bin/ because it is listed
-# under 'datas' in trusttunnel.spec (not 'binaries'), which makes PyInstaller
-# place it via _MEIPASS → Contents/Resources/bin/ on every version.
+# Check py2app path first (Resources/), then PyInstaller paths
 APP_DIR="/Applications/TrustTunnel.app/Contents"
 APP_CLI_CANDIDATES=(
+    "$APP_DIR/Resources/trusttunnel_client"
     "$APP_DIR/Resources/bin/trusttunnel_client"
     "$APP_DIR/MacOS/_internal/bin/trusttunnel_client"
     "$APP_DIR/MacOS/bin/trusttunnel_client"
