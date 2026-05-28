@@ -36,17 +36,33 @@ def _find_project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _find_resource_dir() -> str:
+    """Return the Resources/ directory when running from py2app bundle."""
+    if getattr(sys, 'frozen', False):
+        base = os.environ.get('RESOURCEPATH', '')
+        if base and os.path.basename(base) == 'Resources':
+            return base
+    return ''
+
+
 def _get_binary_paths() -> list:
-    """Return ordered list of paths to search for trusttunnel_client."""
+    """Return ordered list of paths to search for trusttunnel_client.
+
+    py2app puts the binary at Contents/Resources/trusttunnel_client.
+    Dev mode uses project bin/trusttunnel_client.
+    """
     root = _find_project_root()
     paths = []
-    # 1. Bundled in .app or dev project bin/
+    # 1. py2app: Contents/Resources/trusttunnel_client
+    resource_dir = _find_resource_dir()
+    if resource_dir:
+        paths.append(os.path.join(resource_dir, "trusttunnel_client"))
+    # 2. Dev/project bin/
     paths.append(os.path.join(root, "bin", "trusttunnel_client"))
-    # 2. System install
+    # 3. System install
     paths.append("/opt/trusttunnel_client/trusttunnel_client")
     paths.append("/usr/local/bin/trusttunnel_client")
-    # 3. Plain name (PATH lookup)
-    paths.append("trusttunnel_client")
+    # 4. Full PATH scan (resolve each candidate to absolute path)
     return paths
 
 
