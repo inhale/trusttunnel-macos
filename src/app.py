@@ -109,6 +109,16 @@ class AddEditDialog:
         self._entries["certificate"] = cert_edit
         layout.addRow("Certificate:", cert_edit)
 
+        dns_block_edit = QTextEdit()
+        dns_block_edit.setPlaceholderText(
+            "DNS servers to block (one IP per line).\n"
+            "These are blocked via pf to prevent DNS leaks.\n"
+            "Default: Google, Cloudflare, Quad9, AdGuard DoH IPs."
+        )
+        dns_block_edit.setMaximumHeight(100)
+        self._entries["dns_blocklist"] = dns_block_edit
+        layout.addRow("DNS Blocklist:", dns_block_edit)
+
         if self._profile:
             ep = self._profile.endpoint
             self._entries["name"].setText(self._profile.name)
@@ -119,6 +129,8 @@ class AddEditDialog:
             self._entries["bound_if"].setText(self._profile.tun.bound_if)
             if ep.certificate:
                 cert_edit.setPlainText(ep.certificate)
+            if self._profile.tun.dns_blocklist:
+                dns_block_edit.setPlainText("\n".join(self._profile.tun.dns_blocklist))
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -141,6 +153,11 @@ class AddEditDialog:
         password = self._entries["password"].text()
         bound_if = self._entries["bound_if"].text().strip()
         certificate = self._entries["certificate"].toPlainText().strip()
+        dns_blocklist_raw = self._entries["dns_blocklist"].toPlainText().strip()
+        dns_blocklist = [
+            ip.strip() for ip in dns_blocklist_raw.splitlines()
+            if ip.strip() and not ip.strip().startswith("#")
+        ]
 
         if not name or not hostname or not address or not username:
             QMessageBox.warning(self._dlg, "Missing Fields",
@@ -157,6 +174,7 @@ class AddEditDialog:
         )
         self.result = ServerProfile(name=name, endpoint=ep)
         self.result.tun.bound_if = bound_if
+        self.result.tun.dns_blocklist = dns_blocklist
         self._dlg.accept()
 
     def exec(self):

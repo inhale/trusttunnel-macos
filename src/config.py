@@ -64,6 +64,12 @@ class TunConfig:
     tcp_send_buf_size: int = 0
     change_system_dns: bool = True
     device_name: str = ""
+    dns_blocklist: list[str] = field(default_factory=lambda: [
+        "8.8.8.8", "8.8.4.4",
+        "1.1.1.1", "1.0.0.1",
+        "9.9.9.9", "149.112.112.112",
+        "94.140.14.14", "94.140.15.15",
+    ])
 
 
 @dataclass
@@ -317,6 +323,7 @@ def load_servers() -> list[ServerProfile]:
                 tcp_send_buf_size=tun_data.get("tcp_send_buf_size", 0),
                 change_system_dns=tun_data.get("change_system_dns", True),
                 device_name=tun_data.get("device_name", ""),
+                dns_blocklist=tun_data.get("dns_blocklist", []),
             )
             socks_data = s.get("socks", {})
             socks = SocksConfig(

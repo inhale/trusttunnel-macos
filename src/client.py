@@ -140,7 +140,7 @@ def _get_primary_service() -> str:
     return ""
 
 
-def _enforce_dns_through_tunnel(log_lines: list[str]) -> None:
+def _enforce_dns_through_tunnel(log_lines: list[str], dns_blocklist: list[str] = None) -> None:
     """Set macOS system DNS to the tunnel's local proxy to prevent DNS leaks.
 
     This ensures ALL DNS queries go through the VPN tunnel, not just those
@@ -166,8 +166,7 @@ def _enforce_dns_through_tunnel(log_lines: list[str]) -> None:
             ["networksetup", "-getdnsservers", service],
             capture_output=True, text=True, timeout=5,
         )
-        # Store in the last connect log for the ClientManager to pick up
-        # (we don't have direct access to self here, so we use a module-level)
+        global _saved_dns_service, _saved_dns_servers
         _saved_dns_service = service
         _saved_dns_servers = [
             s.strip() for s in current.stdout.splitlines()
@@ -197,20 +196,19 @@ def _enforce_dns_through_tunnel(log_lines: list[str]) -> None:
     except Exception as e:
         log_lines.append(f"[{_ts()}] WARNING: failed to set system DNS: {e}")
 
-    # Also block DNS-over-TLS (port 853) and common DoH endpoints
-    # to prevent apps from bypassing the local proxy
-    _block_outside_dns(log_lines)
+    # Also block DNS-over-TLS (port 853) and DoH endpoints
+    _block_outside_dns(log_lines, dns_blocklist)
 
 
-def _block_outside_dns(log_lines: list[str]) -> None:
+def _block_outside_dns(log_lines: list[str], dns_blocklist: list[str] = None) -> None:
     """Add pf rules to force all DNS through the tunnel proxy.
 
     This blocks:
     - Plain DNS (port 53) to any non-local address
     - DNS-over-TLS (port 853) to any non-local address
-    - Common DoH IPs (Google 8.8.8.8, Cloudflare 1.1.1.1, etc.)
-    
-    All DNS is redirected to 127.0.0.1 which is the tunnel's local proxy.
+    - DoH endpoints from the dns_blocklist (IPs the user configured)
+
+    All DNS goes to 127.0.0.1 which is the tunnel's local proxy.
     """
     import re as _re
 
@@ -219,9 +217,16 @@ def _block_outside_dns(log_lines: list[str]) -> None:
     if not port:
         return
 
+    # Build DoH block rules from the configured blocklist
+    doh_rules = ""
+    if dns_blocklist:
+        for ip in dns_blocklist:
+            ip = ip.strip()
+            if ip:
+                doh_rules += f"block drop out proto tcp from any to {ip} port 443\n"
+
     # Build pf anchor rules
-    pf_rules = f"""
-# TrustTunnel DNS leak prevention
+    pf_rules = f"""# TrustTunnel DNS leak prevention
 # Block all DNS outside tunnel, redirect to local proxy
 
 # Allow local proxy
@@ -235,20 +240,8 @@ block drop out proto tcp from any to any port 53
 # Block DNS-over-TLS (port 853)
 block drop out proto tcp from any to any port 853
 
-# Block known DoH endpoints (redirect through tunnel)
-# Google DNS DoH
-block drop out proto tcp from any to 8.8.8.8 port 443
-block drop out proto tcp from any to 8.8.4.4 port 443
-# Cloudflare DoH
-block drop out proto tcp from any to 1.1.1.1 port 443
-block drop out proto tcp from any to 1.0.0.1 port 443
-# Quad9 DoH
-block drop out proto tcp from any to 9.9.9.9 port 443
-block drop out proto tcp from any to 149.112.112.112 port 443
-# AdGuard DoH
-block drop out proto tcp from any to 94.140.14.14 port 443
-block drop out proto tcp from any to 94.140.15.15 port 443
-"""
+# Block configured DoH endpoints
+{doh_rules}"""
 
     # Write to a temp anchor file
     anchor_file = os.path.join(tempfile.gettempdir(), "tt_dns_anchor.conf")
@@ -658,6 +651,8 @@ class ClientManager:
             self._set_error(f"Failed to write config to {config_path}:\n{e}")
             return False
         self._config_path = config_path
+        # Store dns_blocklist for DNS leak prevention after connect
+        self._dns_blocklist = profile.tun.dns_blocklist or []
 
         # ── Spawn process ──
         self._set_phase(ConnectPhase.SPAWNING_PROCESS)
@@ -825,7 +820,9 @@ class ClientManager:
                             self._status.state = ClientState.CONNECTED
                             self._status.phase = ConnectPhase.TUNNEL_UP
                     # Force system DNS through the tunnel to prevent leaks
-                    _enforce_dns_through_tunnel(self._status.log_lines)
+                    # Force system DNS through the tunnel to prevent leaks
+                    dns_blocklist = getattr(self, "_dns_blocklist", None)
+                    _enforce_dns_through_tunnel(self._status.log_lines, dns_blocklist)
                     self._notify()
         except Exception:
             pass
